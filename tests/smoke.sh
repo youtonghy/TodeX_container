@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for a built image: start, health, container API, preinstalled
-# CLIs, pairing CLI permissions, mounted-file ownership, and state kept across
-# a restart.
+# CLIs, pairing CLI permissions, mounted-file ownership, the local socket
+# (when the image's backend has one), and state kept across a restart.
 #
 #   tests/smoke.sh IMAGE
 #
@@ -15,13 +15,16 @@ container=todex-smoke-$suffix
 volume=todex-smoke-home-$suffix
 workdir=$(mktemp -d "${TMPDIR:-/tmp}/todex-smoke.XXXXXX")
 workdir=$(cd "$workdir" && pwd -P)
+ipcdir=$(mktemp -d "${TMPDIR:-/tmp}/todex-smoke-ipc.XXXXXX")
+ipcdir=$(cd "$ipcdir" && pwd -P)
+ipc_socket=$ipcdir/agentd.sock
 
 fail() { printf 'smoke: FAIL: %s\n' "$*" >&2; docker logs --tail 60 "$container" >&2 || true; exit 1; }
 pass() { printf 'smoke: ok: %s\n' "$*"; }
 cleanup() {
     docker rm -f "$container" > /dev/null 2>&1 || true
     docker volume rm "$volume" > /dev/null 2>&1 || true
-    rm -rf "$workdir"
+    rm -rf "$workdir" "$ipcdir"
 }
 trap cleanup EXIT
 
@@ -47,6 +50,7 @@ docker run -d --name "$container" \
     -e TODEX_EXTRA_AGENTS="${SMOKE_EXTRA_AGENTS:-}" \
     -v "$volume:/home/todex" \
     -v "$workdir:$workdir" \
+    -v "$ipcdir:/run/todex-ipc" \
     "$image" > /dev/null
 wait_healthy
 pass "container is healthy"
@@ -94,11 +98,56 @@ if [ "$container_api" = 1 ]; then
     pass "pair CLI works as todex and refuses other users"
 fi
 
+# The local socket: reachable from the host user (the daemon's UID), refused
+# for everyone else, and the local-admin API exists only there.
+ipc_get() { curl -fsS --max-time 10 --unix-socket "$ipc_socket" "http://localhost$1"; }
+for _ in $(seq 1 10); do
+    [ ! -S "$ipc_socket" ] || break
+    sleep 1
+done
+if [ -S "$ipc_socket" ]; then
+    ipc=1
+    [ "$(stat -c %a "$ipc_socket")" = 600 ] || fail "socket mode is $(stat -c %a "$ipc_socket"), not 600"
+    [ "$(stat -c %u "$ipcdir")" = "$(id -u)" ] || fail "socket directory is not owned by the host user"
+    [ "$(ipc_get /v2/version | jq -r .name)" = todex-agentd ] || fail "/v2/version over the socket"
+    admin=$(ipc_get /v2/local-admin/status) || fail "/v2/local-admin/status over the socket"
+    jq -e '.deployment == "container" and .configEditable == false and .ipcPath == "/run/todex-ipc/agentd.sock"' \
+        <<< "$admin" > /dev/null || fail "local-admin status: $admin"
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 --unix-socket "$ipc_socket" \
+        -X PUT -H 'Content-Type: application/json' -d '{"autoUpdate":true}' http://localhost/v2/local-admin/config)
+    [ "$status" = 409 ] || fail "local-admin config should be managed by the image (409), got $status"
+    status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$port/v2/local-admin/status")
+    [ "$status" != 200 ] || fail "local-admin API answers on TCP"
+    as_todex curl -fsS --max-time 10 --unix-socket /run/todex-ipc/agentd.sock http://localhost/v2/version > /dev/null \
+        || fail "todex cannot use the socket inside the container"
+    # Root passes the file permissions, so only the daemon's peer UID check
+    # can refuse it; UID 12345 is stopped by the 0700 directory already.
+    if docker exec -u 0 "$container" curl -fsS --max-time 10 --unix-socket /run/todex-ipc/agentd.sock \
+        http://localhost/v2/version > /dev/null 2>&1; then
+        fail "the socket accepted a connection from root"
+    fi
+    if docker exec -u 12345 "$container" curl -fsS --max-time 10 --unix-socket /run/todex-ipc/agentd.sock \
+        http://localhost/v2/version > /dev/null 2>&1; then
+        fail "the socket accepted a connection from UID 12345"
+    fi
+    pass "local socket serves the host user and the local-admin API, refuses other UIDs"
+else
+    ipc=0
+    printf 'smoke: skip: backend %s does not create a local socket\n' "$(jq -r .version <<< "$version")"
+fi
+
 keys_before=$(as_todex sha256sum /home/todex/.todex-agent/pairing_keys.json)
 docker restart "$container" > /dev/null
 wait_healthy
 keys_after=$(as_todex sha256sum /home/todex/.todex-agent/pairing_keys.json)
 [ "$keys_before" = "$keys_after" ] || fail "pairing keys changed across a restart"
+if [ "$ipc" = 1 ]; then
+    for _ in $(seq 1 10); do
+        ipc_get /v2/version > /dev/null 2>&1 && break
+        sleep 1
+    done
+    ipc_get /v2/version > /dev/null || fail "local socket does not come back after a restart"
+fi
 pass "state survives a restart"
 
 printf 'smoke: all checks passed for %s\n' "$image"

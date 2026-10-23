@@ -4,6 +4,11 @@
 # next to this repository, or TODEX_PROTOCOL_DIR.
 #
 #   tests/pairing-e2e/run.sh IMAGE
+#
+# A second device then pairs over the local socket (mounted from a host
+# directory) and is approved through the local-admin API. PAIRING_E2E_IPC:
+# auto (default; skipped when the backend creates no socket), 1 (required),
+# 0 (skipped).
 set -euo pipefail
 
 image=${1:?usage: tests/pairing-e2e/run.sh IMAGE}
@@ -15,10 +20,14 @@ mirrored=$(mktemp -d "${TMPDIR:-/tmp}/todex-pairing.XXXXXX")
 mirrored=$(cd "$mirrored" && pwd -P)
 mapped=$(mktemp -d "${TMPDIR:-/tmp}/todex-pairing-mapped.XXXXXX")
 mapped=$(cd "$mapped" && pwd -P)
+ipcdir=$(mktemp -d "${TMPDIR:-/tmp}/todex-pairing-ipc.XXXXXX")
+ipcdir=$(cd "$ipcdir" && pwd -P)
+ipc_mode=${PAIRING_E2E_IPC:-auto}
+case "$ipc_mode" in auto | 0 | 1) ;; *) echo "pairing-e2e: PAIRING_E2E_IPC must be auto, 0 or 1" >&2; exit 64 ;; esac
 cleanup() {
     docker rm -f "$container" > /dev/null 2>&1 || true
     docker volume rm "$volume" > /dev/null 2>&1 || true
-    rm -rf "$mirrored" "$mapped"
+    rm -rf "$mirrored" "$mapped" "$ipcdir"
 }
 trap cleanup EXIT
 
@@ -33,6 +42,7 @@ docker run -d --name "$container" \
     -v "$volume:/home/todex" \
     -v "$mirrored:$mirrored" \
     -v "$mapped:/workspace/e2e" \
+    -v "$ipcdir:/run/todex-ipc" \
     "$image" > /dev/null
 
 for _ in $(seq 1 90); do
@@ -52,4 +62,20 @@ if ! docker exec -u todex "$container" todex-agentd pair --help > /dev/null 2>&1
 fi
 
 node "$here/pairing-e2e.mjs" --server "http://127.0.0.1:$port" --container "$container" \
+    --expect-mapping "$mapped=/workspace/e2e"
+
+[ "$ipc_mode" != 0 ] || exit 0
+for _ in $(seq 1 10); do
+    [ ! -S "$ipcdir/agentd.sock" ] || break
+    sleep 1
+done
+if [ ! -S "$ipcdir/agentd.sock" ]; then
+    if [ "$ipc_mode" = 1 ]; then
+        echo "pairing-e2e: FAIL: the backend created no local socket" >&2
+        exit 1
+    fi
+    echo "pairing-e2e: skip: the image's todex-agentd creates no local socket"
+    exit 0
+fi
+node "$here/pairing-e2e.mjs" --ipc-socket "$ipcdir/agentd.sock" \
     --expect-mapping "$mapped=/workspace/e2e"

@@ -8,7 +8,12 @@
 //
 // --approve-command replaces the docker exec approval (for a backend run on
 // the host): the verification code is appended as the last argument.
+//
+// --ipc-socket PATH talks to the backend's local socket instead, the way
+// Desktop on the same host does: every request goes over the socket, and the
+// request is approved through the local-admin API with the verification code.
 import { execFileSync } from 'node:child_process';
+import http from 'node:http';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
@@ -23,6 +28,7 @@ const { values: args } = parseArgs({
     server: { type: 'string', default: 'http://127.0.0.1:7345' },
     container: { type: 'string' },
     'approve-command': { type: 'string' },
+    'ipc-socket': { type: 'string' },
     'expect-mapping': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -34,14 +40,55 @@ function fail(message) {
 const pass = (message) => console.log(`pairing-e2e: ok: ${message}`);
 const encode = (bytes) => deviceAuth.encodeBase64Url(bytes);
 
-async function post(action, body) {
-  const response = await fetch(new URL(`/v2/device-pairing/${action}`, args.server), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+const ipcSocket = args['ipc-socket'];
+// The pairing transport checks only look at the URL for plaintext servers.
+const serverUrl = ipcSocket ? 'http://localhost' : args.server;
+
+// Returns { status, text }; over the socket with node:http (fetch cannot use
+// a Unix socket), otherwise with fetch.
+function request(method, path, { body, headers = {} } = {}) {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  const allHeaders = payload === undefined ? { ...headers } : { 'Content-Type': 'application/json', ...headers };
+  if (!ipcSocket) {
+    return fetch(new URL(path, args.server), { method, headers: allHeaders, body: payload })
+      .then(async (response) => ({ status: response.status, text: await response.text() }));
+  }
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { socketPath: ipcSocket, path, method, headers: { Host: 'localhost', ...allHeaders }, timeout: 15000 },
+      (response) => {
+        let text = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { text += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, text }));
+        response.on('error', reject);
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error(`${method} ${path} timed out`)));
+    req.on('error', reject);
+    req.end(payload);
   });
-  if (!response.ok) fail(`${action} returned HTTP ${response.status}: ${await response.text()}`);
-  return response.json();
+}
+
+async function requestJson(method, path, options) {
+  const { status, text } = await request(method, path, options);
+  if (status < 200 || status >= 300) fail(`${method} ${path} returned HTTP ${status}: ${text}`);
+  return JSON.parse(text);
+}
+
+const post = (action, body) => requestJson('POST', `/v2/device-pairing/${action}`, { body });
+
+async function approveOverIpc(requestId, code) {
+  const pending = await requestJson('GET', '/v2/local-admin/pairing-requests');
+  const entry = pending.find((r) => r.requestId === requestId);
+  if (!entry) fail(`local-admin does not list request ${requestId}: ${JSON.stringify(pending)}`);
+  if (entry.peerAddress !== 'ipc') fail(`request made over the socket has peerAddress ${entry.peerAddress}`);
+  if (entry.deviceName !== deviceName) fail(`local-admin lists device name ${entry.deviceName}`);
+  const decision = `/v2/local-admin/pairing-requests/${encodeURIComponent(requestId)}/decision`;
+  const wrong = await request('POST', decision, { body: { approved: true, verificationCode: 'AAAAA-AAAAA' } });
+  if (wrong.status !== 409) fail(`a wrong verification code returned HTTP ${wrong.status}, not 409: ${wrong.text}`);
+  const result = await requestJson('POST', decision, { body: { approved: true, verificationCode: code } });
+  if (result.ok !== true) fail(`decision returned ${JSON.stringify(result)}`);
 }
 
 function approve(code) {
@@ -65,7 +112,7 @@ const created = await post('create', {
   devicePublicKey: device.publicKey,
   deviceName,
 });
-const transport = secureChannel.parseDevicePairingTransport(created, args.server);
+const transport = secureChannel.parseDevicePairingTransport(created, serverUrl);
 const material = secureChannel.deriveDevicePairingV3Material({
   requestId: created.requestId,
   clientSecretKey: keys.secretKey,
@@ -84,9 +131,14 @@ const revealed = await post('reveal', {
 if (revealed.status !== 'pending') fail(`reveal status ${revealed.status}`);
 pass(`pairing request created (code ${material.verificationCode})`);
 
-const approval = approve(material.verificationCode);
-if (!approval.includes(deviceName)) fail(`pair approve did not name the device:\n${approval}`);
-pass('approved with todex-agentd pair approve');
+if (ipcSocket) {
+  await approveOverIpc(created.requestId, material.verificationCode);
+  pass('approved through the local-admin API on the socket (a wrong code was refused)');
+} else {
+  const approval = approve(material.verificationCode);
+  if (!approval.includes(deviceName)) fail(`pair approve did not name the device:\n${approval}`);
+  pass('approved with todex-agentd pair approve');
+}
 
 let result;
 for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -107,9 +159,7 @@ pass(`paired as ${credential.deviceId}; transport key matches the create respons
 async function version(signed) {
   const path = '/v2/version';
   const headers = signed ? deviceAuth.deviceAuthHeaders(device, 'GET', path) : {};
-  const response = await fetch(new URL(path, args.server), { headers });
-  if (!response.ok) fail(`${path} returned HTTP ${response.status}`);
-  return response.json();
+  return requestJson('GET', path, { headers });
 }
 
 const anonymous = await version(false);
