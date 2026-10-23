@@ -100,8 +100,9 @@ TODEX_AGENTD_SOURCE=source docker compose -f compose.yaml -f compose.build.yaml 
 # Tests against an image
 tests/smoke.sh todex_container:local
 tests/pairing-e2e/run.sh todex_container:local   # needs ../TodeX_protocol
+tests/todexc.sh                                  # launcher only, no Docker needed
 ```
 
-Pins are build arguments in the `Dockerfile` (`TODEX_AGENTD_VERSION`, `NODE_VERSION`) and `agents/package.json` with its lockfile. CI (`.github/workflows/image.yml`) lints, builds `linux/amd64` and `linux/arm64` on native runners, and runs both tests. A manual run with *publish* pushes `ghcr.io/youtonghy/todex_container:<backend version>`, `:<backend version>-<yyyymmdd>` and `:latest`.
+Pins are build arguments in the `Dockerfile` (`TODEX_AGENTD_VERSION`, `NODE_VERSION`) and `agents/package.json` with its lockfile. `.github/workflows/checks.yml` runs on every push and pull request: shellcheck, hadolint and `tests/todexc.sh` (the launcher, without Docker), then a `linux/amd64` and a `linux/arm64` build on native runners with the smoke and pairing tests. The manual *Publish image* workflow (`image.yml`) reruns those checks and pushes `ghcr.io/youtonghy/todex_container:<backend version>`, `:<backend version>-<yyyymmdd>` and, optionally, `:latest`.
 
 The design and the backend and client interfaces behind this image are described in [docs/PLAN.md](docs/PLAN.md). Contributor rules are in [AGENTS.md](AGENTS.md).

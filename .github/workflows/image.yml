@@ -1,15 +1,8 @@
-name: Image
+name: Publish image
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
-      publish:
-        description: Push the image to ghcr.io
-        type: boolean
-        default: false
       latest:
         description: Also tag the published image as latest
         type: boolean
@@ -26,18 +19,13 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/todex_container
 
 jobs:
-  lint:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - name: shellcheck
-        run: shellcheck bin/todexc rootfs/usr/local/bin/todex-entrypoint tests/smoke.sh tests/pairing-e2e/run.sh
-      - uses: hadolint/hadolint-action@v3.5.0
-        with:
-          dockerfile: Dockerfile
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      protocol_ref: ${{ inputs.protocol_ref }}
 
   build:
-    needs: lint
+    needs: checks
     strategy:
       fail-fast: false
       matrix:
@@ -52,14 +40,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
-        with:
-          repository: youtonghy/TodeX_protocol
-          ref: ${{ inputs.protocol_ref || 'main' }}
-          path: TodeX_protocol
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
       - uses: docker/setup-buildx-action@v4
       - name: Build version
         id: version
@@ -67,31 +47,13 @@ jobs:
           agentd=$(sed -n 's/^ARG TODEX_AGENTD_VERSION=//p' Dockerfile | head -n 1)
           echo "agentd=$agentd" >> "$GITHUB_OUTPUT"
           echo "build=$agentd-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-      - name: Build for testing
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          build-args: TODEX_BUILD_VERSION=${{ steps.version.outputs.build }}
-          load: true
-          tags: todex_container:test
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
-      - name: Smoke test
-        run: tests/smoke.sh todex_container:test
-      - name: Pairing test
-        env:
-          TODEX_PROTOCOL_DIR: ${{ github.workspace }}/TodeX_protocol
-        run: tests/pairing-e2e/run.sh todex_container:test
       - name: Log in to ghcr.io
-        if: inputs.publish
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push by digest
-        if: inputs.publish
         id: push
         uses: docker/build-push-action@v7
         with:
@@ -102,14 +64,12 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.platform }}
       - name: Record digest
-        if: inputs.publish
         run: |
           mkdir -p digests
           touch "digests/${DIGEST#sha256:}"
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
-      - if: inputs.publish
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: digest-${{ matrix.runner }}
           path: digests/*
@@ -119,7 +79,6 @@ jobs:
       build: ${{ steps.version.outputs.build }}
 
   publish:
-    if: inputs.publish
     needs: build
     runs-on: ubuntu-24.04
     permissions:

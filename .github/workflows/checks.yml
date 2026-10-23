@@ -1,0 +1,66 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      protocol_ref:
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck bin/todexc rootfs/usr/local/bin/todex-entrypoint tests/smoke.sh tests/pairing-e2e/run.sh tests/todexc.sh
+      - name: todexc
+        run: tests/todexc.sh
+      - uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+
+  build:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: youtonghy/TodeX_protocol
+          ref: ${{ inputs.protocol_ref || 'main' }}
+          path: TodeX_protocol
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: docker/setup-buildx-action@v4
+      - name: Build for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: todex_container:test
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+      - name: Smoke test
+        run: tests/smoke.sh todex_container:test
+      - name: Pairing test
+        env:
+          TODEX_PROTOCOL_DIR: ${{ github.workspace }}/TodeX_protocol
+        run: tests/pairing-e2e/run.sh todex_container:test

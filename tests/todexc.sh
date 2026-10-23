@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Checks bin/todexc without Docker: a fake `docker` records calls and reports
+# a healthy container, and the generated compose file is inspected.
+#
+#   tests/todexc.sh
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd -P)
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/todexc-test.XXXXXX")
+scratch=$(cd "$scratch" && pwd -P)
+trap 'rm -rf "$scratch"' EXIT
+
+mkdir -p "$scratch/bin" "$scratch/config" "$scratch/work/a b" "$scratch/work/c"
+cat > "$scratch/bin/docker" <<'EOF'
+#!/bin/sh
+[ "$1 $2" = "compose version" ] && exit 0
+echo "docker $*" >> "$TODEXC_TEST_CALLS"
+case "$*" in *" ps "*) echo container-id ;; esac
+[ "$1" = inspect ] && echo healthy
+exit 0
+EOF
+chmod +x "$scratch/bin/docker"
+export TODEXC_TEST_CALLS="$scratch/calls"
+
+fail() { printf 'todexc test: FAIL: %s\n' "$*" >&2; exit 1; }
+todexc() {
+    PATH="$scratch/bin:$PATH" XDG_CONFIG_HOME="$scratch/config" bash "$repo/bin/todexc" "$@" < /dev/null 2> "$scratch/stderr"
+}
+expect_failure() {
+    if todexc "$@"; then fail "todexc $* should fail"; fi
+}
+
+todexc up --mount "$scratch/work/a b" --mount "$scratch/work/c:/workspace/c" || fail "up: $(cat "$scratch/stderr")"
+compose="$scratch/config/todex-container/todex/compose.yaml"
+grep -q 'container_name: "todex"' "$compose" || fail "default container is not named todex"
+grep -q '"127.0.0.1:7345:7345"' "$compose" || fail "not published on loopback"
+grep -qF "TODEX_AGENTD_WORKSPACE_ROOTS: \"$scratch/work/a b:/workspace/c\"" "$compose" || fail "workspace roots"
+grep -qF "{\\\"hostPath\\\":\\\"$scratch/work/a b\\\",\\\"backendPath\\\":\\\"$scratch/work/a b\\\"}" "$compose" \
+    || fail "mirrored mount has no identity mapping"
+grep -qF "{\\\"hostPath\\\":\\\"$scratch/work/c\\\",\\\"backendPath\\\":\\\"/workspace/c\\\"}" "$compose" \
+    || fail "mapped mount has no mapping"
+grep -q "TODEX_UID: \"$(id -u)\"" "$compose" || fail "host UID not passed"
+
+expect_failure mount add "$scratch/work/c:/etc"
+expect_failure mount add "$scratch/work/c:/home/todex/x"
+expect_failure mount add "$scratch/work/c:/workspace/with:colon"
+expect_failure mount add "$scratch/work/a b:/workspace/c"
+expect_failure --name Bad up --mount "$scratch/work/c"
+expect_failure up --port abc
+
+todexc mount rm /workspace/c || fail "mount rm"
+[ "$(todexc mount list)" = "$scratch/work/a b -> $scratch/work/a b" ] || fail "mount list after rm"
+
+todexc pair ABCDE-12345 || fail "pair"
+tail -n 1 "$TODEXC_TEST_CALLS" | grep -q 'exec -u todex todex todex-agentd pair approve ABCDE-12345' \
+    || fail "pair does not approve as the todex user"
+
+todexc --name second up --port 7346 --mount "$scratch/work/c" || fail "second instance"
+grep -q 'container_name: "todex-second"' "$scratch/config/todex-container/second/compose.yaml" || fail "named instance"
+
+printf 'todexc test: all checks passed\n'

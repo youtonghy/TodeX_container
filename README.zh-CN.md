@@ -104,10 +104,11 @@ TODEX_AGENTD_SOURCE=source docker compose -f compose.yaml -f compose.build.yaml 
 # 对镜像运行测试
 tests/smoke.sh todex_container:local
 tests/pairing-e2e/run.sh todex_container:local   # 需要 ../TodeX_protocol
+tests/todexc.sh                                  # 只测启动器，不需要 Docker
 ```
 
 版本固定在两个地方：`Dockerfile` 的构建参数（`TODEX_AGENTD_VERSION`、`NODE_VERSION`），以及 `agents/package.json` 和它的 lockfile。
 
-CI（`.github/workflows/image.yml`）会做 lint，在原生 runner 上分别构建 `linux/amd64` 和 `linux/arm64`，并跑两套测试。手动运行并勾选 *publish* 时，会推送 `ghcr.io/youtonghy/todex_container` 的三个标签：`:<后端版本>`、`:<后端版本>-<yyyymmdd>`、`:latest`。
+`.github/workflows/checks.yml` 在每次 push 和 PR 时运行：先跑 shellcheck、hadolint 和 `tests/todexc.sh`（不需要 Docker 的启动器测试），再在原生 runner 上分别构建 `linux/amd64` 和 `linux/arm64`，并跑冒烟测试和配对测试。手动运行 *Publish image*（`image.yml`）会先重跑这些检查，然后推送 `ghcr.io/youtonghy/todex_container` 的 `:<后端版本>`、`:<后端版本>-<yyyymmdd>`，以及可选的 `:latest`。
 
 镜像背后的设计，以及后端和客户端的接口，见 [docs/PLAN.md](docs/PLAN.md)；贡献规范见 [AGENTS.md](AGENTS.md)。
