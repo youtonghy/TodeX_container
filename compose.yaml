@@ -12,6 +12,7 @@
 services:
   todex:
     image: ghcr.io/youtonghy/todex_container:${TODEX_CONTAINER_TAG:-latest}
+    container_name: ${TODEX_CONTAINER_NAME:-todex}
     restart: unless-stopped
     ports:
       - "${TODEX_LISTEN:-127.0.0.1}:${TODEX_PORT:-7345}:7345"

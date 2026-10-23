@@ -216,6 +216,11 @@ ssh_agent_source() {
     fi
 }
 
+# The default instance is "todex", the name Desktop's approval hint uses.
+container_name() {
+    if [ "$name" = todex ]; then printf 'todex\n'; else printf 'todex-%s\n' "$name"; fi
+}
+
 compose_file() { printf '%s/compose.yaml\n' "$instance_dir"; }
 
 generate_compose() {
@@ -238,7 +243,7 @@ generate_compose() {
         printf 'services:\n'
         printf '  todex:\n'
         printf '    image: %s\n' "$(quote "$TODEX_IMAGE:$TODEX_TAG")"
-        printf '    container_name: %s\n' "$(quote "todex-$name")"
+        printf '    container_name: %s\n' "$(quote "$(container_name)")"
         printf '    restart: unless-stopped\n'
         printf '    ports:\n'
         printf '      - %s\n' "$(quote "$TODEX_LISTEN:$TODEX_PORT:7345")"
