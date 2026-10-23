@@ -9,11 +9,18 @@
 # For several work directories use bin/todexc or a compose.override.yaml; for
 # Windows hosts set TODEX_WORKDIR_TARGET; TODEX_PATH_MAPPINGS always mirrors
 # the mount (see README and .env.example).
+#
+# On Linux, create the local-socket directory first so it belongs to you
+# (otherwise Docker creates it, and any missing parents, as root):
+#
+#   mkdir -p -m 700 ~/.config/todex-container/default/ipc
 services:
   todex:
     image: ghcr.io/youtonghy/todex_container:${TODEX_CONTAINER_TAG:-latest}
     container_name: ${TODEX_CONTAINER_NAME:-todex}
     restart: unless-stopped
+    labels:
+      io.todex.instance: ${TODEX_INSTANCE:-default}
     ports:
       - "${TODEX_LISTEN:-127.0.0.1}:${TODEX_PORT:-7345}:7345"
     environment:
@@ -32,6 +39,15 @@ services:
       - type: bind
         source: ${TODEX_WORKDIR:?set TODEX_WORKDIR to an absolute host directory}
         target: ${TODEX_WORKDIR_TARGET:-${TODEX_WORKDIR}}
+      # The daemon's local socket (agentd.sock) appears in this host directory;
+      # TodeX Desktop on the same Linux host connects and pairs through it.
+      # Docker Desktop (macOS, Windows) cannot pass the socket to the host;
+      # Desktop uses TCP there.
+      - type: bind
+        source: ${TODEX_IPC_DIR:-${HOME}/.config/todex-container/default/ipc}
+        target: /run/todex-ipc
+        bind:
+          create_host_path: true
 
 volumes:
   home:

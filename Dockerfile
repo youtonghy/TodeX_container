@@ -106,10 +106,13 @@ COPY --from=agents /opt/todex/agents /opt/todex/agents
 COPY rootfs/ /
 
 # The entrypoint aligns this user's UID/GID with the host before dropping to it.
+# /run/todex-ipc holds the daemon's local socket (TODEX_AGENTD_IPC_PATH); on
+# Linux hosts a host directory is bind-mounted over it so Desktop can connect.
 RUN groupadd --gid 1000 todex \
     && useradd --uid 1000 --gid todex --create-home --shell /bin/bash todex \
     && install -d -o todex -g todex -m 0700 /home/todex/.todex-agent \
     && install -d -o todex -g todex /home/todex/.local /home/todex/.local/bin /workspace \
+    && install -d -o todex -g todex -m 0700 /run/todex-ipc \
     && chmod 0755 /usr/local/bin/todex-entrypoint
 
 ENV HOME=/home/todex \
@@ -118,6 +121,7 @@ ENV HOME=/home/todex \
     TODEX_AGENTD_PORT=7345 \
     TODEX_AGENTD_DATA_DIR=/home/todex/.todex-agent \
     TODEX_AGENTD_DEPLOYMENT=container \
+    TODEX_AGENTD_IPC_PATH=/run/todex-ipc/agentd.sock \
     TODEX_AGENTD_IMAGE_CLI_DIR=/opt/todex/agents \
     TODEX_AUTO_UPDATE=0 \
     TODEX_EXTRA_AGENTS=claude-code

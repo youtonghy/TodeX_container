@@ -20,6 +20,12 @@ case "$*" in *" ps "*) echo container-id ;; esac
 exit 0
 EOF
 chmod +x "$scratch/bin/docker"
+# uname reports TODEXC_TEST_UNAME (default Linux) so both host kinds are covered.
+cat > "$scratch/bin/uname" <<'EOF'
+#!/bin/sh
+echo "${TODEXC_TEST_UNAME:-Linux}"
+EOF
+chmod +x "$scratch/bin/uname"
 export TODEXC_TEST_CALLS="$scratch/calls"
 
 fail() { printf 'todexc test: FAIL: %s\n' "$*" >&2; exit 1; }
@@ -40,6 +46,14 @@ grep -qF "{\\\"hostPath\\\":\\\"$scratch/work/a b\\\",\\\"backendPath\\\":\\\"$s
 grep -qF "{\\\"hostPath\\\":\\\"$scratch/work/c\\\",\\\"backendPath\\\":\\\"/workspace/c\\\"}" "$compose" \
     || fail "mapped mount has no mapping"
 grep -q "TODEX_UID: \"$(id -u)\"" "$compose" || fail "host UID not passed"
+grep -q 'io.todex.instance: "todex"' "$compose" || fail "instance label"
+ipc="$scratch/config/todex-container/todex/ipc"
+grep -A 1 -- '- type: bind' "$compose" | grep -qF "source: \"$ipc\"" || fail "ipc directory is not mounted"
+grep -A 1 -F "source: \"$ipc\"" "$compose" | grep -qF 'target: "/run/todex-ipc"' || fail "ipc mount target"
+[ -d "$ipc" ] || fail "ipc directory was not created"
+[ "$(stat -c %a "$ipc")" = 700 ] || fail "ipc directory mode is $(stat -c %a "$ipc"), not 700"
+grep -qF "Local socket: $ipc/agentd.sock" "$scratch/stderr" || fail "up does not print the local socket path"
+expect_failure mount add "$scratch/work/c:/run/todex-ipc"
 
 expect_failure mount add "$scratch/work/c:/etc"
 expect_failure mount add "$scratch/work/c:/home/todex/x"
@@ -57,5 +71,19 @@ tail -n 1 "$TODEXC_TEST_CALLS" | grep -q 'exec -u todex todex todex-agentd pair 
 
 todexc --name second up --port 7346 --mount "$scratch/work/c" || fail "second instance"
 grep -q 'container_name: "todex-second"' "$scratch/config/todex-container/second/compose.yaml" || fail "named instance"
+grep -q 'io.todex.instance: "second"' "$scratch/config/todex-container/second/compose.yaml" || fail "named instance label"
+
+# An ipc directory with loose permissions is tightened.
+chmod 0755 "$ipc"
+todexc up || fail "up again: $(cat "$scratch/stderr")"
+[ "$(stat -c %a "$ipc")" = 700 ] || fail "ipc directory mode was not reset to 700"
+
+# Docker Desktop cannot pass Unix sockets: no ipc mount on macOS.
+TODEXC_TEST_UNAME=Darwin todexc --name mac up --mount "$scratch/work/c" || fail "macOS instance: $(cat "$scratch/stderr")"
+mac_compose="$scratch/config/todex-container/mac/compose.yaml"
+if grep -q 'todex-ipc' "$mac_compose"; then fail "ipc mounted on macOS"; fi
+[ ! -e "$scratch/config/todex-container/mac/ipc" ] || fail "ipc directory created on macOS"
+grep -q 'io.todex.instance: "mac"' "$mac_compose" || fail "macOS instance label"
+if grep -qF 'Local socket' "$scratch/stderr"; then fail "macOS up prints a local socket"; fi
 
 printf 'todexc test: all checks passed\n'

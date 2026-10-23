@@ -5,6 +5,8 @@
 #   ${XDG_CONFIG_HOME:-~/.config}/todex-container/<name>/
 # from its settings (settings.env) and mount list (mounts). Its home volume
 # keeps pairing, agent logins and history across recreation and upgrades.
+# On Linux the instance's ipc/ directory is bind-mounted to /run/todex-ipc,
+# where the daemon creates its local socket (agentd.sock) for TodeX Desktop.
 set -euo pipefail
 
 readonly default_image=ghcr.io/youtonghy/todex_container
@@ -48,6 +50,7 @@ name=todex
 instance_dir=
 settings_file=
 mounts_file=
+ipc_dir=
 
 set_instance() {
     case "$1" in
@@ -57,6 +60,23 @@ set_instance() {
     instance_dir="$config_root/$name"
     settings_file="$instance_dir/settings.env"
     mounts_file="$instance_dir/mounts"
+    ipc_dir="$instance_dir/ipc"
+}
+
+# Docker Desktop (macOS) cannot pass Unix sockets through its file sharing,
+# so the local socket is only offered on Linux hosts.
+ipc_supported() { [ "$(uname -s)" = Linux ]; }
+
+# The socket directory must belong to the host user: the daemon runs with the
+# same UID and only accepts connections from it.
+prepare_ipc_dir() {
+    mkdir -p "$ipc_dir"
+    [ "$(stat -c %u "$ipc_dir")" = "$(id -u)" ] \
+        || die "$ipc_dir is not owned by you; remove it and run todexc again"
+    chmod 0700 "$ipc_dir"
+    # sun_path holds 108 bytes including the terminator.
+    [ "${#ipc_dir}" -le 95 ] \
+        || note "Warning: $ipc_dir/agentd.sock is too long for a Unix socket path; Desktop will use TCP."
 }
 
 require_docker() {
@@ -235,6 +255,7 @@ generate_compose() {
         mappings+="${mappings:+,}{\"hostPath\":$(json_string "${mount_hosts[$i]}"),\"backendPath\":$(json_string "${mount_targets[$i]}")}"
     done
     [ -z "$mappings" ] || mappings="[$mappings]"
+    if ipc_supported; then prepare_ipc_dir; fi
     local advertise_host=$TODEX_LISTEN
     case "$advertise_host" in 0.0.0.0 | '::' | '[::]') advertise_host=127.0.0.1 ;; esac
     case "$advertise_host" in *:*) advertise_host="[$advertise_host]" ;; esac
@@ -247,6 +268,8 @@ generate_compose() {
         printf '    image: %s\n' "$(quote "$TODEX_IMAGE:$TODEX_TAG")"
         printf '    container_name: %s\n' "$(quote "$(container_name)")"
         printf '    restart: unless-stopped\n'
+        printf '    labels:\n'
+        printf '      io.todex.instance: %s\n' "$(quote "$name")"
         printf '    ports:\n'
         printf '      - %s\n' "$(quote "$TODEX_LISTEN:$TODEX_PORT:7345")"
         printf '    environment:\n'
@@ -272,6 +295,11 @@ generate_compose() {
             printf '      - type: bind\n'
             printf '        source: %s\n' "$(quote "$(ssh_agent_source)")"
             printf '        target: "/run/host-ssh-agent.sock"\n'
+        fi
+        if ipc_supported; then
+            printf '      - type: bind\n'
+            printf '        source: %s\n' "$(quote "$ipc_dir")"
+            printf '        target: "/run/todex-ipc"\n'
         fi
         printf 'volumes:\n'
         printf '  home:\n'
@@ -332,6 +360,13 @@ print_connect() {
     case "$host" in *:*) host="[$host]" ;; esac
     note ""
     note "Backend URL for TodeX Desktop: http://$host:$TODEX_PORT"
+    if ipc_supported; then
+        if [ -S "$ipc_dir/agentd.sock" ]; then
+            note "Local socket (Desktop on this machine pairs through it): $ipc_dir/agentd.sock"
+        else
+            note "Local socket: $ipc_dir/agentd.sock (not present: the container is stopped or its backend predates local sockets)"
+        fi
+    fi
     note "In Desktop: Settings > Backend connections > Add, enter the URL, start pairing,"
     local name_flag=""
     [ "$name" = todex ] || name_flag=" --name $name"

@@ -24,6 +24,15 @@ chmod +x todexc
 
 订阅登录（Codex 用 ChatGPT 账号、Claude Code 用 Claude 账号）可能需要在容器里登录一次：在 Desktop 中打开这个后端的终端，运行 `codex login --device-auth`，或者运行 `claude` 后输入 `/login`。登录状态保存在 home 卷里。
 
+## 本地 socket（Linux）
+
+在 Linux 上，`todexc` 还会把 `~/.config/todex-container/<name>/ipc/`（以 `0700` 创建，属于你）挂到容器的 `/run/todex-ipc`，后端在里面创建本地 socket `agentd.sock`。同一台机器上的 TodeX Desktop 通过这个 socket 发现容器，并自己批准配对请求，不需要输入验证码。`todexc up` 和 `todexc status` 会打印 socket 路径。其他机器和客户端照旧使用上面的 URL 加验证码流程。
+
+socket 只接受与后端运行用户相同 UID 的连接，`todexc` 会把这个 UID 设成你的。经它配对不需要网络侧的批准入口，信任程度等同于对后端数据目录的文件访问权限。
+
+- macOS 和 Windows：Docker Desktop 无法把容器里的 Unix socket 传到宿主机，所以 `todexc` 在这些系统上不挂载它。Desktop 走 TCP 连接，配对用 `todexc pair`（或 `docker exec … todex-agentd pair approve`）批准。
+- rootless Docker、Podman 和 `userns-remap`：容器里的 UID 与宿主用户的 UID 不同，socket 会拒绝你的连接，Desktop 回退到 TCP。
+
 ## `todexc`
 
 | 命令 | 作用 |
@@ -48,11 +57,14 @@ chmod +x todexc
 
 ```sh
 cp .env.example .env   # 设置 TODEX_WORKDIR、TODEX_PATH_MAPPINGS、TODEX_UID、TODEX_GID
+mkdir -p -m 700 ~/.config/todex-container/default/ipc   # Linux：本地 socket 目录
 docker compose up -d
 docker compose exec -u todex todex todex-agentd pair approve <验证码>
 ```
 
 `compose.yaml` 挂载一个目录，默认按原路径挂载，设置了 `TODEX_WORKDIR_TARGET` 时挂到该路径。要挂更多目录，就在 `compose.override.yaml` 里加 `volumes`，并把所有挂载目标用 `:` 连接，写进 `TODEX_AGENTD_WORKSPACE_ROOTS`。
+
+本地 socket 出现在 `TODEX_IPC_DIR`（默认 `~/.config/todex-container/default/ipc`）里；容器带有标签 `io.todex.instance=${TODEX_INSTANCE:-default}`。首次启动前按上面的命令自己创建这个目录：目录不存在时，Docker 会以 root 身份创建它以及缺失的上级目录。entrypoint 之后会把目录本身交给 `TODEX_UID`，但 root 所有的上级目录不会变。macOS 和 Windows 上宿主机无法使用这个 socket（见[本地 socket](#本地-socketlinux)）。
 
 ### Windows 宿主机
 

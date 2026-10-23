@@ -24,6 +24,15 @@ Then, in TodeX Desktop:
 
 Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one login inside the container. Open a terminal on the container backend in Desktop and run `codex login --device-auth` or `claude`, then `/login`. Logins are kept in the home volume.
 
+## Local socket (Linux)
+
+On Linux, `todexc` also mounts `~/.config/todex-container/<name>/ipc/` (created mode `0700`, owned by you) at `/run/todex-ipc` in the container, and the backend creates its local socket there as `agentd.sock`. TodeX Desktop on the same machine finds the container through that socket and approves its own pairing request, so no code needs to be typed. `todexc up` and `todexc status` print the socket path. The URL-and-code flow above keeps working for other machines and clients.
+
+The socket only accepts connections from the user ID the backend runs as, which `todexc` sets to yours. Pairing through it needs no network-side approval: it is as trusted as file access to the backend's data directory.
+
+- macOS and Windows: Docker Desktop cannot pass a Unix socket from the container to the host, so `todexc` skips the mount there. Desktop connects over TCP and pairing is approved with `todexc pair` (or `docker exec … todex-agentd pair approve`).
+- Rootless Docker, Podman and `userns-remap`: the container's user ID is not your host user ID, so the socket rejects your connections and Desktop falls back to TCP.
+
 ## `todexc`
 
 | Command | What it does |
@@ -48,11 +57,14 @@ Mounting a folder after it has been used as a workspace at another path changes 
 
 ```sh
 cp .env.example .env   # set TODEX_WORKDIR, TODEX_PATH_MAPPINGS, TODEX_UID, TODEX_GID
+mkdir -p -m 700 ~/.config/todex-container/default/ipc   # Linux: the local socket directory
 docker compose up -d
 docker compose exec -u todex todex todex-agentd pair approve <CODE>
 ```
 
 `compose.yaml` mounts one directory, at its host path unless `TODEX_WORKDIR_TARGET` is set. For more directories, add a `compose.override.yaml` with extra `volumes` entries and list every mount target in `TODEX_AGENTD_WORKSPACE_ROOTS` (`:`-separated).
+
+The local socket appears in `TODEX_IPC_DIR` (default `~/.config/todex-container/default/ipc`); the container carries the label `io.todex.instance=${TODEX_INSTANCE:-default}`. Create the directory yourself before the first start, as above: if it is missing, Docker creates it, and any missing parent, as root. The entrypoint then gives the directory itself to `TODEX_UID`, but root-owned parents stay. On macOS and Windows the socket is not usable from the host (see [Local socket](#local-socket-linux)).
 
 ### Windows hosts
 

@@ -44,6 +44,22 @@ for dir in "$home" "$home/.local" "$home/.local/bin" "$home/.todex-agent"; do
 done
 chmod 0700 "$home/.todex-agent"
 
+# The local socket's directory is usually a host bind mount (Linux). Only its
+# root is re-owned, never anything inside it. A socket left by a previous run
+# is removed so the daemon can bind again. The socket is optional: a failure
+# here is reported and the daemon still serves TCP.
+readonly ipc_dir=/run/todex-ipc
+if [ -d "$ipc_dir" ]; then
+    if [ "$(stat -c '%u:%g' "$ipc_dir")" != "$uid:$gid" ] && ! chown "$uid:$gid" "$ipc_dir"; then
+        log "warning: could not chown $ipc_dir; the local socket may be unusable"
+    fi
+    chmod 0700 "$ipc_dir" || log "warning: could not chmod $ipc_dir"
+    ipc_socket="${TODEX_AGENTD_IPC_PATH:-}"
+    case "$ipc_socket" in
+        "$ipc_dir"/*) if [ -S "$ipc_socket" ]; then rm -f "$ipc_socket"; fi ;;
+    esac
+fi
+
 as_user() {
     setpriv --reuid="$uid" --regid="$gid" --init-groups -- "$@"
 }
