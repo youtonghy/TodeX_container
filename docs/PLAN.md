@@ -1,6 +1,6 @@
 # TodeX Agent 容器：方案与接口计划
 
-状态：待审批（2026-10-23）。依据 `TodeX_backend`（`dad2ed7`）、`TodeX_desktop`（`e4c4146`）、`TodeX_protocol`（`72a7eb2`）、`TodeX_web` 当前 `main` 的只读调查。
+状态：已批准（2026-10-23），第 6 节决策采用计划建议。依据 `TodeX_backend`（`dad2ed7`）、`TodeX_desktop`（`e4c4146`）、`TodeX_protocol`（`72a7eb2`）、`TodeX_web` 当前 `main` 的只读调查。
 
 ## 1. 目标与完成标准
 
@@ -185,7 +185,7 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 
 #### 本仓库（TodeX_container）
 
-`Dockerfile`、`rootfs/usr/local/bin/todex-entrypoint`、`bin/todexc`、`compose.yaml`、`compose.build.yaml`（叠加层：从兄弟仓库源码构建后端，供开发用）、`.env.example`、`README.md` / `README.zh-CN.md`、`tests/smoke.sh`、`tests/pairing-e2e.ts`、`.github/workflows/image.yml`。
+`Dockerfile`、`rootfs/usr/local/bin/todex-entrypoint`、`bin/todexc`、`compose.yaml`、`compose.build.yaml`（叠加层：从兄弟仓库源码构建后端，供开发用）、`.env.example`、`README.md` / `README.zh-CN.md`、`tests/smoke.sh`、`tests/pairing-e2e/`、`.github/workflows/image.yml`。
 
 ### 3.5 关键取舍
 
@@ -232,7 +232,7 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 ### 步骤 3：镜像切换到新后端，加入 `todexc` 和发布流水线
 
 - **交付结果：** `todexc up/pair/devices/mount/upgrade/...`；`TODEX_EXTRA_AGENTS`；`image.yml` 在原生 amd64 和 arm64 runner 上构建、冒烟测试、合并 manifest 并推送。
-- **完成标准：** 完成标准 1、2、3、7 成立；`tests/pairing-e2e.ts` 用 `TodeX_protocol` 的配对实现无头完成“create → reveal → `pair approve` → poll”，并用签名请求读到 `deployment` 和 `pathMappings`。
+- **完成标准：** 完成标准 1、2、3、7 成立；`tests/pairing-e2e/` 用 `TodeX_protocol` 的配对实现无头完成“create → reveal → `pair approve` → poll”，并用签名请求读到 `deployment` 和 `pathMappings`。
 - **依赖：** 步骤 2 的后端发布。
 
 ### 步骤 4：协议层与客户端（D1–D3）
@@ -303,4 +303,4 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 - B：全部预装进公开镜像。首次启动更快、离线可用，许可风险由你承担。改动步骤 1、3 的 Dockerfile 和第 2.5 节。
 - C：全部在首次启动时安装，镜像不预装任何 CLI。镜像最小，没有许可问题，也不需要后端的 `managedBy`；但首次启动要联网、耗时几分钟。删掉 3.4 中的 `IMAGE_CLI_DIR` / `managedBy` 和 D3。
 
-**你可以回答：** `采用计划建议`，或者 `选择 B` / `选择 C`。
+**已确认：** 采用计划建议（2026-10-23）。
