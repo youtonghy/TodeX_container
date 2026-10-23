@@ -19,7 +19,7 @@
 必须保持不变的行为：
 
 - 后端在宿主机上的默认行为不变。新增的环境变量全部默认关闭，新增的响应字段都是可选追加。
-- 配对协议 v3 和 transport v2 规则不变；不新增任何网络侧的配对批准入口。
+- 配对协议 v3 和 transport v2 规则不变；不新增任何网络侧的配对批准入口。本机 IPC 的 local-admin API（见 3.7）不算网络侧入口：它只挂在 Unix socket 上，从不路由到 TCP，并且只接受与守护进程 euid 相同的对端 UID，等同于对数据目录的本机文件权限（同一 UID 本来就能写 `device-pairing/` 批准文件）。
 - Desktop/Web 连接非容器后端时的行为不变；老后端不返回新字段时，客户端按现状处理。
 
 ## 2. 产品行为与默认决策
@@ -204,6 +204,18 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 第 1 步完成前，镜像可以先基于当前后端版本出 MVP，配对用 TUI 批准（步骤 1）。
 
 回滚：镜像回退到上一个不可变标签；后端字段是追加的，老客户端会忽略；新客户端遇到老后端时按 `host` 处理。
+
+### 3.7 本机 IPC（Linux 宿主机）
+
+目标：同一台 Linux 机器上的 TodeX Desktop 不用敲验证码，经本地 Unix socket 连接容器并自动批准自己的配对请求。接口约定见后端的 IPC 监听和 local-admin API（`docs/API.md`）。
+
+- **镜像：** `ENV TODEX_AGENTD_IPC_PATH=/run/todex-ipc/agentd.sock`；`/run/todex-ipc` 属于 `todex`，权限 0700。entrypoint 只修正这个挂载点本身的属主（`TODEX_UID:TODEX_GID`）和权限，不递归；启动前删除上次遗留的 socket 文件。失败只记警告，后端照常以纯 TCP 运行（目录不可写时后端也只警告）。
+- **`todexc`：** 仅在 Linux 上创建 `${XDG_CONFIG_HOME:-~/.config}/todex-container/<name>/ipc/`（0700，属于宿主用户；属主不对时报错退出），bind mount 到 `/run/todex-ipc`。所有平台都给服务加标签 `io.todex.instance=<name>`。`up`/`status` 打印 socket 路径。`/run/*` 仍是用户 `--mount` 的保留目标。
+- **compose：** 同样的 bind mount，宿主路径 `${TODEX_IPC_DIR:-${HOME}/.config/todex-container/default/ipc}`，`create_host_path: true`；标签 `io.todex.instance=${TODEX_INSTANCE:-default}`。README 要求首次启动前 `mkdir -p -m 700`，否则 Docker 以 root 创建该目录及缺失的上级目录（entrypoint 之后会修正目录本身，修不了上级）。
+- **发现：** Desktop 扫描 `~/.config/todex-container/*/ipc/agentd.sock`，并结合 `docker ps --filter label=io.todex.instance`。
+- **信任模型：** 后端在 accept 时比对 `peer_cred().uid()` 与自身 euid，不一致直接断开。`todexc` 已把容器用户的 UID 对齐宿主用户，所以宿主用户能连、其他用户（包括容器里的 root）不能。local-admin 的批准仍要求请求的验证码，经 socket 发起的配对请求记录 `peerAddress: "ipc"`。
+- **不适用的场景：** Docker Desktop（macOS、Windows）的文件共享无法把 Unix socket 传到宿主机，`todexc` 在 macOS 上不挂载，Desktop 走 TCP + `todexc pair`/`docker exec … pair approve`。rootless Docker、Podman、`userns-remap` 下容器 UID 与宿主 UID 不同，socket 会拒绝宿主用户，Desktop 同样回退到 TCP。socket 路径超过 `sun_path` 上限（107 字节）时 `todexc` 给出警告。
+- **验证：** `tests/todexc.sh` 检查 Linux 上的挂载、0700 目录和标签，以及 macOS 上没有挂载；`tests/smoke.sh` 从宿主机经 socket 访问 `/v2/version`、`/v2/local-admin/status`（`deployment=container`、`configEditable=false`），确认 TCP 上没有 local-admin、容器内 root 和其他 UID 被拒绝；`tests/pairing-e2e` 经 socket 完成 create → reveal → local-admin 批准 → poll。镜像里的后端不支持 IPC 时，这两项测试跳过。
 
 ## 4. 实施步骤
 
