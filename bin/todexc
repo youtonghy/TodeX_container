@@ -1,0 +1,495 @@
+#!/usr/bin/env bash
+# todexc — run and manage TodeX agent containers (Linux and macOS hosts).
+#
+# Each instance is a Docker Compose project generated under
+#   ${XDG_CONFIG_HOME:-~/.config}/todex-container/<name>/
+# from its settings (settings.env) and mount list (mounts). Its home volume
+# keeps pairing, agent logins and history across recreation and upgrades.
+set -euo pipefail
+
+readonly default_image=ghcr.io/youtonghy/todex_container
+readonly config_root="${XDG_CONFIG_HOME:-$HOME/.config}/todex-container"
+# Mount targets that would shadow the image or the system.
+readonly reserved_targets=(/ /bin /boot /dev /etc /home/todex /lib /lib64 /opt /opt/node /opt/todex /proc /root /run /sbin /srv /sys /tmp /usr /var)
+
+usage() {
+    cat <<'EOF'
+Usage: todexc [--name NAME] <command> [options]
+
+Commands:
+  up [options]            Create or update the instance and start it
+      --mount PATH[:TARGET]   Mount a host directory (repeatable). Without
+                              TARGET it is mounted at the same path.
+      --port PORT             Host port (default 7345)
+      --listen ADDR           Host address to publish on (default 127.0.0.1)
+      --agents LIST           CLIs to install on first start (default claude-code;
+                              "" for none)
+      --ssh-agent             Forward the host SSH agent into the container
+      --no-ssh-agent          Stop forwarding the SSH agent
+      --tag TAG               Image tag (default latest)
+      --image IMAGE           Image repository (default ghcr.io/youtonghy/todex_container)
+  down                    Stop and remove the container (the home volume stays)
+  status                  Show the container state and connect URL
+  logs [-f]               Show daemon logs
+  shell                   Open a shell as the todex user
+  pair [CODE]             Approve a TodeX Desktop pairing request
+  devices [revoke ID]     List paired devices, or revoke one
+  mount list|add|rm ...   Manage mounted directories (recreates the container)
+  upgrade                 Pull the image and recreate the container
+
+The default instance name is "todex".
+EOF
+}
+
+die() { printf 'todexc: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+
+name=todex
+instance_dir=
+settings_file=
+mounts_file=
+
+set_instance() {
+    case "$1" in
+        '' | *[!a-z0-9_-]*) die "instance names use lowercase letters, digits, '-' and '_'" ;;
+    esac
+    name=$1
+    instance_dir="$config_root/$name"
+    settings_file="$instance_dir/settings.env"
+    mounts_file="$instance_dir/mounts"
+}
+
+require_docker() {
+    command -v docker > /dev/null || die "docker is not installed"
+    docker compose version > /dev/null 2>&1 || die "Docker Compose v2 ('docker compose') is required"
+}
+
+require_instance() {
+    [ -f "$settings_file" ] || die "instance '$name' does not exist; run 'todexc up --mount PATH' first"
+}
+
+# Settings default to the host user's IDs; root would make agents run as root.
+load_settings() {
+    TODEX_PORT=7345
+    TODEX_LISTEN=127.0.0.1
+    TODEX_IMAGE=$default_image
+    TODEX_TAG=latest
+    TODEX_EXTRA_AGENTS=claude-code
+    TODEX_SSH_AGENT=0
+    TODEX_UID=$(id -u)
+    TODEX_GID=$(id -g)
+    if [ -f "$settings_file" ]; then
+        # shellcheck source=/dev/null
+        . "$settings_file"
+    fi
+}
+
+save_settings() {
+    mkdir -p "$instance_dir"
+    {
+        printf 'TODEX_PORT=%q\n' "$TODEX_PORT"
+        printf 'TODEX_LISTEN=%q\n' "$TODEX_LISTEN"
+        printf 'TODEX_IMAGE=%q\n' "$TODEX_IMAGE"
+        printf 'TODEX_TAG=%q\n' "$TODEX_TAG"
+        printf 'TODEX_EXTRA_AGENTS=%q\n' "$TODEX_EXTRA_AGENTS"
+        printf 'TODEX_SSH_AGENT=%q\n' "$TODEX_SSH_AGENT"
+        printf 'TODEX_UID=%q\n' "$TODEX_UID"
+        printf 'TODEX_GID=%q\n' "$TODEX_GID"
+    } > "$settings_file"
+}
+
+# Mounts are stored one per line as HOST<TAB>TARGET.
+read_mounts() {
+    mount_hosts=()
+    mount_targets=()
+    [ -f "$mounts_file" ] || return 0
+    local host target
+    while IFS=$'\t' read -r host target; do
+        [ -n "$host" ] || continue
+        mount_hosts+=("$host")
+        mount_targets+=("$target")
+    done < "$mounts_file"
+}
+
+write_mounts() {
+    mkdir -p "$instance_dir"
+    local i
+    : > "$mounts_file.tmp"
+    [ "${#mount_hosts[@]}" -gt 0 ] || { mv "$mounts_file.tmp" "$mounts_file"; return 0; }
+    for i in "${!mount_hosts[@]}"; do
+        printf '%s\t%s\n' "${mount_hosts[$i]}" "${mount_targets[$i]}" >> "$mounts_file.tmp"
+    done
+    mv "$mounts_file.tmp" "$mounts_file"
+}
+
+absolute_dir() {
+    [ -d "$1" ] || die "not a directory: $1"
+    (cd "$1" && pwd -P)
+}
+
+clean_target() {
+    local target=$1
+    case "$target" in /*) ;; *) die "mount target must be an absolute path: $target" ;; esac
+    while [ "${#target}" -gt 1 ] && [ "${target%/}" != "$target" ]; do target=${target%/}; done
+    local reserved
+    for reserved in "${reserved_targets[@]}"; do
+        [ "$target" != "$reserved" ] || die "mount target $target would hide part of the container; choose another target"
+    done
+    case "$target" in
+        /home/todex/* | /opt/todex/* | /opt/node/* | /usr/* | /etc/* | /proc/* | /sys/* | /dev/* | /run/*)
+            die "mount target $target is inside a path the container needs; choose another target" ;;
+    esac
+    case "$target" in *$'\t'* | *$'\n'*) die "mount paths must not contain tabs or newlines" ;; esac
+    # Workspace roots are passed ':'-separated.
+    case "$target" in *:*) die "mount target $target contains ':'; pass a TARGET without it (PATH:TARGET)" ;; esac
+    printf '%s\n' "$target"
+}
+
+add_mount() {
+    local spec=$1 host target
+    # Split HOST[:TARGET] on the last ':' followed by '/', so plain host paths
+    # (which may contain ':') stay whole.
+    if [[ "$spec" =~ ^(.+):(/.*)$ ]]; then
+        host=${BASH_REMATCH[1]}
+        target=${BASH_REMATCH[2]}
+    else
+        host=$spec
+        target=
+    fi
+    host=$(absolute_dir "$host")
+    case "$host" in *$'\t'* | *$'\n'*) die "mount paths must not contain tabs or newlines" ;; esac
+    target=$(clean_target "${target:-$host}")
+    local i
+    [ "${#mount_hosts[@]}" -gt 0 ] || { mount_hosts=("$host"); mount_targets=("$target"); return 0; }
+    for i in "${!mount_hosts[@]}"; do
+        if [ "${mount_targets[$i]}" = "$target" ]; then
+            [ "${mount_hosts[$i]}" = "$host" ] && return 0
+            die "$target is already mounted from ${mount_hosts[$i]}"
+        fi
+    done
+    mount_hosts+=("$host")
+    mount_targets+=("$target")
+}
+
+remove_mount() {
+    local path=$1 i found=0 hosts=() targets=()
+    if [ -d "$path" ]; then path=$(absolute_dir "$path"); fi
+    [ "${#mount_hosts[@]}" -gt 0 ] || die "$path is not mounted"
+    for i in "${!mount_hosts[@]}"; do
+        if [ "${mount_hosts[$i]}" = "$path" ] || [ "${mount_targets[$i]}" = "$path" ]; then
+            found=1
+            continue
+        fi
+        hosts+=("${mount_hosts[$i]}")
+        targets+=("${mount_targets[$i]}")
+    done
+    [ "$found" -eq 1 ] || die "$path is not mounted"
+    mount_hosts=()
+    mount_targets=()
+    [ "${#hosts[@]}" -eq 0 ] || { mount_hosts=("${hosts[@]}"); mount_targets=("${targets[@]}"); }
+}
+
+# A JSON string is also a valid YAML double-quoted scalar. '$' is doubled so
+# Compose does not interpolate it.
+quote() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//\$/\$\$}
+    printf '"%s"' "$s"
+}
+
+json_string() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    printf '"%s"' "$s"
+}
+
+ssh_agent_source() {
+    if [ "$(uname -s)" = Darwin ]; then
+        # Docker Desktop's forwarded agent socket.
+        printf '/run/host-services/ssh-auth.sock\n'
+    else
+        [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ] || die "--ssh-agent needs a running SSH agent (SSH_AUTH_SOCK)"
+        printf '%s\n' "$SSH_AUTH_SOCK"
+    fi
+}
+
+compose_file() { printf '%s/compose.yaml\n' "$instance_dir"; }
+
+generate_compose() {
+    [ "${#mount_hosts[@]}" -gt 0 ] || die "mount at least one work directory: todexc up --mount PATH"
+    local roots="" mappings="" i
+    for i in "${!mount_hosts[@]}"; do
+        roots+="${roots:+:}${mount_targets[$i]}"
+        # Mounts at their host path need no mapping.
+        if [ "${mount_hosts[$i]}" != "${mount_targets[$i]}" ]; then
+            mappings+="${mappings:+,}{\"hostPath\":$(json_string "${mount_hosts[$i]}"),\"backendPath\":$(json_string "${mount_targets[$i]}")}"
+        fi
+    done
+    [ -z "$mappings" ] || mappings="[$mappings]"
+    local advertise_host=$TODEX_LISTEN
+    case "$advertise_host" in 0.0.0.0 | '::' | '[::]') advertise_host=127.0.0.1 ;; esac
+    case "$advertise_host" in *:*) advertise_host="[$advertise_host]" ;; esac
+
+    {
+        printf '# Generated by todexc for instance "%s"; edit with todexc, not by hand.\n' "$name"
+        printf 'name: %s\n' "$(quote "todex-$name")"
+        printf 'services:\n'
+        printf '  todex:\n'
+        printf '    image: %s\n' "$(quote "$TODEX_IMAGE:$TODEX_TAG")"
+        printf '    container_name: %s\n' "$(quote "todex-$name")"
+        printf '    restart: unless-stopped\n'
+        printf '    ports:\n'
+        printf '      - %s\n' "$(quote "$TODEX_LISTEN:$TODEX_PORT:7345")"
+        printf '    environment:\n'
+        printf '      TODEX_UID: %s\n' "$(quote "$TODEX_UID")"
+        printf '      TODEX_GID: %s\n' "$(quote "$TODEX_GID")"
+        printf '      TODEX_AGENTD_WORKSPACE_ROOTS: %s\n' "$(quote "$roots")"
+        printf '      TODEX_AGENTD_PATH_MAPPINGS: %s\n' "$(quote "$mappings")"
+        printf '      TODEX_AGENTD_ADVERTISE_URL: %s\n' "$(quote "http://$advertise_host:$TODEX_PORT")"
+        printf '      TODEX_EXTRA_AGENTS: %s\n' "$(quote "$TODEX_EXTRA_AGENTS")"
+        if [ "$TODEX_SSH_AGENT" = 1 ]; then
+            printf '      SSH_AUTH_SOCK: "/run/host-ssh-agent.sock"\n'
+        fi
+        printf '    volumes:\n'
+        printf '      - type: volume\n'
+        printf '        source: home\n'
+        printf '        target: /home/todex\n'
+        for i in "${!mount_hosts[@]}"; do
+            printf '      - type: bind\n'
+            printf '        source: %s\n' "$(quote "${mount_hosts[$i]}")"
+            printf '        target: %s\n' "$(quote "${mount_targets[$i]}")"
+        done
+        if [ "$TODEX_SSH_AGENT" = 1 ]; then
+            printf '      - type: bind\n'
+            printf '        source: %s\n' "$(quote "$(ssh_agent_source)")"
+            printf '        target: "/run/host-ssh-agent.sock"\n'
+        fi
+        printf 'volumes:\n'
+        printf '  home:\n'
+        printf '    name: %s\n' "$(quote "todex-$name-home")"
+    } > "$instance_dir/compose.yaml.tmp"
+    mv "$instance_dir/compose.yaml.tmp" "$(compose_file)"
+}
+
+compose() {
+    docker compose -f "$(compose_file)" "$@"
+}
+
+container_running() {
+    [ -n "$(compose ps --status running -q todex 2> /dev/null)" ]
+}
+
+# Commands that touch the daemon's control files run as its user.
+exec_todex() {
+    container_running || die "instance '$name' is not running; start it with 'todexc up'"
+    compose exec -u todex todex "$@"
+}
+
+# Same, without a TTY, for output that is parsed.
+exec_todex_capture() {
+    container_running || die "instance '$name' is not running; start it with 'todexc up'"
+    compose exec -T -u todex todex "$@"
+}
+
+wait_healthy() {
+    local id state i
+    id=$(compose ps -q todex)
+    for i in $(seq 1 90); do
+        state=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2> /dev/null || true)
+        case "$state" in
+            healthy) return 0 ;;
+            exited | dead) break ;;
+        esac
+        sleep 2
+        [ "$i" -ne 15 ] || note "Waiting for the backend (first start installs agent CLIs)..."
+    done
+    compose logs --tail 40 todex >&2 || true
+    die "the container did not become healthy (state: ${state:-unknown})"
+}
+
+confirm_recreate() {
+    container_running || return 0
+    note "This recreates the container; agent turns that are running now are interrupted."
+    if [ -t 0 ]; then
+        local answer
+        read -r -p "Continue? [y/N] " answer
+        case "$answer" in y | Y | yes) ;; *) die "cancelled" ;; esac
+    fi
+}
+
+print_connect() {
+    local host=$TODEX_LISTEN
+    case "$host" in 0.0.0.0 | '::' | '[::]') host=127.0.0.1 ;; esac
+    case "$host" in *:*) host="[$host]" ;; esac
+    note ""
+    note "Backend URL for TodeX Desktop: http://$host:$TODEX_PORT"
+    note "In Desktop: Settings > Backend connections > Add, enter the URL, start pairing,"
+    local name_flag=""
+    [ "$name" = todex ] || name_flag=" --name $name"
+    note "then run 'todexc$name_flag pair' here and enter the code Desktop shows."
+}
+
+cmd_up() {
+    load_settings
+    read_mounts
+    local had_settings=0
+    [ -f "$settings_file" ] && had_settings=1
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --mount) [ "$#" -ge 2 ] || die "--mount needs a path"; add_mount "$2"; shift 2 ;;
+            --port) [ "$#" -ge 2 ] || die "--port needs a value"; TODEX_PORT=$2; shift 2 ;;
+            --listen) [ "$#" -ge 2 ] || die "--listen needs an address"; TODEX_LISTEN=$2; shift 2 ;;
+            --agents) [ "$#" -ge 2 ] || die "--agents needs a list"; TODEX_EXTRA_AGENTS=$2; shift 2 ;;
+            --ssh-agent) TODEX_SSH_AGENT=1; shift ;;
+            --no-ssh-agent) TODEX_SSH_AGENT=0; shift ;;
+            --tag) [ "$#" -ge 2 ] || die "--tag needs a value"; TODEX_TAG=$2; shift 2 ;;
+            --image) [ "$#" -ge 2 ] || die "--image needs a value"; TODEX_IMAGE=$2; shift 2 ;;
+            *) die "unknown option for up: $1" ;;
+        esac
+    done
+    case "$TODEX_PORT" in '' | *[!0-9]*) die "--port must be a number" ;; esac
+    case "$TODEX_EXTRA_AGENTS" in *[!a-z0-9,\ -]*) die "--agents takes comma-separated provider ids" ;; esac
+    if [ "$TODEX_UID" = 0 ] || [ "$TODEX_GID" = 0 ]; then
+        die "refusing to run agents as root; run todexc as your normal user"
+    fi
+    if [ "$TODEX_LISTEN" != 127.0.0.1 ] && [ "$TODEX_LISTEN" != ::1 ] && [ "$TODEX_LISTEN" != localhost ]; then
+        note "Publishing on $TODEX_LISTEN: other machines can reach the backend. They still need to pair, and traffic is encrypted."
+    fi
+    [ "$had_settings" -eq 0 ] || confirm_recreate
+    save_settings
+    write_mounts
+    generate_compose
+    compose up -d --remove-orphans
+    wait_healthy
+    print_connect
+}
+
+cmd_down() {
+    require_instance
+    compose down
+    note "Stopped. The home volume todex-$name-home (pairing, logins, history) is kept."
+}
+
+cmd_status() {
+    require_instance
+    load_settings
+    read_mounts
+    compose ps
+    local i
+    note ""
+    note "Mounts:"
+    if [ "${#mount_hosts[@]}" -gt 0 ]; then
+        for i in "${!mount_hosts[@]}"; do note "  ${mount_hosts[$i]} -> ${mount_targets[$i]}"; done
+    fi
+    print_connect
+}
+
+cmd_logs() {
+    require_instance
+    compose logs "$@" todex
+}
+
+cmd_shell() {
+    require_instance
+    container_running || die "instance '$name' is not running"
+    compose exec -u todex todex bash -l
+}
+
+cmd_pair() {
+    require_instance
+    local code=${1:-}
+    if [ -z "$code" ]; then
+        local count i
+        for i in $(seq 1 150); do
+            count=$(exec_todex_capture sh -c 'todex-agentd pair list --format json | jq length' || true)
+            case "$count" in '' | *[!0-9]*) die "could not list pairing requests (is the image older than this todexc?)" ;; esac
+            [ "$count" -eq 0 ] || break
+            [ "$i" -ne 1 ] || note "Waiting for a pairing request from TodeX Desktop (Ctrl-C to stop)..."
+            sleep 2
+        done
+        [ "$count" -gt 0 ] || die "no pairing request arrived"
+        exec_todex todex-agentd pair list
+        [ -t 0 ] || die "pass the verification code: todexc pair CODE"
+        read -r -p "Verification code shown in TodeX Desktop (empty to cancel): " code
+        [ -n "$code" ] || die "cancelled"
+    fi
+    exec_todex todex-agentd pair approve "$code"
+}
+
+cmd_devices() {
+    require_instance
+    case "${1:-list}" in
+        list) exec_todex todex-agentd devices list ;;
+        revoke) [ "$#" -eq 2 ] || die "usage: todexc devices revoke DEVICE_ID"; exec_todex todex-agentd devices revoke "$2" ;;
+        *) die "usage: todexc devices [list|revoke DEVICE_ID]" ;;
+    esac
+}
+
+cmd_mount() {
+    require_instance
+    load_settings
+    read_mounts
+    local action=${1:-list}
+    [ "$#" -eq 0 ] || shift
+    case "$action" in
+        list)
+            local i
+            [ "${#mount_hosts[@]}" -gt 0 ] || return 0
+            for i in "${!mount_hosts[@]}"; do printf '%s -> %s\n' "${mount_hosts[$i]}" "${mount_targets[$i]}"; done
+            return 0
+            ;;
+        add) [ "$#" -eq 1 ] || die "usage: todexc mount add PATH[:TARGET]"; add_mount "$1" ;;
+        rm) [ "$#" -eq 1 ] || die "usage: todexc mount rm PATH"; remove_mount "$1" ;;
+        *) die "usage: todexc mount list|add PATH[:TARGET]|rm PATH" ;;
+    esac
+    confirm_recreate
+    write_mounts
+    generate_compose
+    compose up -d --remove-orphans
+    wait_healthy
+    note "Mounts updated. Workspaces under removed mounts show as missing in TodeX Desktop."
+}
+
+cmd_upgrade() {
+    require_instance
+    load_settings
+    read_mounts
+    generate_compose
+    compose pull todex
+    confirm_recreate
+    compose up -d --remove-orphans
+    wait_healthy
+    note "Upgraded to $TODEX_IMAGE:$TODEX_TAG."
+}
+
+main() {
+    set_instance todex
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --name) [ "$#" -ge 2 ] || die "--name needs a value"; set_instance "$2"; shift 2 ;;
+            -h | --help | help) usage; exit 0 ;;
+            *) break ;;
+        esac
+    done
+    [ "$#" -gt 0 ] || { usage; exit 1; }
+    local command=$1
+    shift
+    require_docker
+    case "$command" in
+        up) cmd_up "$@" ;;
+        down) cmd_down "$@" ;;
+        status) cmd_status "$@" ;;
+        logs) cmd_logs "$@" ;;
+        shell) cmd_shell "$@" ;;
+        pair) cmd_pair "$@" ;;
+        devices) cmd_devices "$@" ;;
+        mount) cmd_mount "$@" ;;
+        upgrade) cmd_upgrade "$@" ;;
+        *) usage; exit 1 ;;
+    esac
+}
+
+main "$@"
