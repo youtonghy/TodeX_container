@@ -1,0 +1,10 @@
+{
+  "name": "todex-container-agents",
+  "private": true,
+  "description": "Agent CLIs preinstalled in the TodeX container image. Only openly licensed CLIs belong here; see docs/PLAN.md section 6.",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@openai/codex": "0.164.0",
+    "opencode-ai": "1.19.4"
+  }
+}

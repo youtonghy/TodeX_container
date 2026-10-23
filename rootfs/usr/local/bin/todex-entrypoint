@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Prepares the todex user and its home volume, then runs the command as that
+# user. Runs as root only for the UID/GID alignment and ownership fixes.
+set -euo pipefail
+
+readonly user=todex
+readonly home=/home/todex
+
+log() { printf 'todex-entrypoint: %s\n' "$*" >&2; }
+die() { log "error: $*"; exit 64; }
+
+if [ "$#" -eq 0 ]; then
+    set -- todex-agentd serve
+fi
+
+# Started with --user: nothing to align, and no privileges to drop.
+if [ "$(id -u)" -ne 0 ]; then
+    exec "$@"
+fi
+
+uid="${TODEX_UID:-1000}"
+gid="${TODEX_GID:-1000}"
+case "$uid" in '' | *[!0-9]*) die "TODEX_UID must be a number, got '$uid'" ;; esac
+case "$gid" in '' | *[!0-9]*) die "TODEX_GID must be a number, got '$gid'" ;; esac
+if [ "$uid" -eq 0 ] || [ "$gid" -eq 0 ]; then
+    die "TODEX_UID/TODEX_GID must not be 0; agents run as an unprivileged user"
+fi
+
+# usermod also re-owns the files the old UID had in the home volume.
+if [ "$(id -g "$user")" != "$gid" ]; then
+    groupmod --non-unique --gid "$gid" "$user"
+fi
+if [ "$(id -u "$user")" != "$uid" ]; then
+    usermod --non-unique --uid "$uid" --gid "$gid" "$user"
+fi
+
+# A fresh or reused volume may carry another owner at the top level. Only the
+# known directories are fixed; mounted work directories are never touched.
+for dir in "$home" "$home/.local" "$home/.local/bin" "$home/.todex-agent"; do
+    mkdir -p "$dir"
+    if [ "$(stat -c '%u:%g' "$dir")" != "$uid:$gid" ]; then
+        chown "$uid:$gid" "$dir"
+    fi
+done
+chmod 0700 "$home/.todex-agent"
+
+as_user() {
+    setpriv --reuid="$uid" --regid="$gid" --init-groups -- "$@"
+}
+
+# Global npm installs (in-app CLI installs) go to the persisted home volume.
+if [ ! -e "$home/.npmrc" ]; then
+    # shellcheck disable=SC2016 # expanded by the inner shell, as the todex user
+    as_user sh -c 'printf "prefix=%s/.local\n" "$HOME" > "$HOME/.npmrc"'
+fi
+
+if [ -n "${TODEX_GIT_NAME:-}" ] && ! as_user git config --global user.name > /dev/null; then
+    as_user git config --global user.name "$TODEX_GIT_NAME"
+fi
+if [ -n "${TODEX_GIT_EMAIL:-}" ] && ! as_user git config --global user.email > /dev/null; then
+    as_user git config --global user.email "$TODEX_GIT_EMAIL"
+fi
+
+if [ -z "${TODEX_AGENTD_WORKSPACE_ROOTS:-}" ] && [ -z "${TODEX_AGENTD_WORKSPACE_ROOT:-}" ]; then
+    export TODEX_AGENTD_WORKSPACE_ROOTS=/workspace
+fi
+
+# Extra CLIs install into the home volume once; a failure (offline, vendor
+# outage) is reported but does not keep the daemon from starting.
+if [ "$1" = todex-agentd ] && [ -n "${TODEX_EXTRA_AGENTS:-}" ]; then
+    read -r -a extra_agents <<< "${TODEX_EXTRA_AGENTS//,/ }"
+    if [ "${#extra_agents[@]}" -gt 0 ]; then
+        log "installing missing agent CLIs: ${extra_agents[*]}"
+        if ! as_user todex-agentd providers install --if-missing "${extra_agents[@]}"; then
+            log "warning: some agent CLIs could not be installed; install them from TodeX Desktop (CLI management)"
+        fi
+    fi
+fi
+
+exec setpriv --reuid="$uid" --regid="$gid" --init-groups -- "$@"

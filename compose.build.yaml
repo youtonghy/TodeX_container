@@ -1,0 +1,16 @@
+# Local build overlay:
+#
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
+# To run an unreleased backend from the sibling checkout, set
+# TODEX_AGENTD_SOURCE=source (and TODEX_BACKEND_DIR if it is not ../TodeX_backend).
+services:
+  todex:
+    image: todex_container:local
+    build:
+      context: .
+      additional_contexts:
+        todexbackend: ${TODEX_BACKEND_DIR:-../TodeX_backend}
+      args:
+        TODEX_AGENTD_SOURCE: ${TODEX_AGENTD_SOURCE:-release}
+        TODEX_BUILD_VERSION: ${TODEX_BUILD_VERSION:-DEV0.0.0}

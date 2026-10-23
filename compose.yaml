@@ -1,0 +1,35 @@
+# TodeX agent container. Copy .env.example to .env, set TODEX_WORKDIR, then:
+#
+#   docker compose up -d
+#
+# Build locally instead of pulling:
+#
+#   docker compose -f compose.yaml -f compose.build.yaml up -d --build
+#
+# For several work directories use bin/todexc or a compose.override.yaml; for
+# Windows hosts set TODEX_WORKDIR_TARGET and TODEX_PATH_MAPPINGS (see README).
+services:
+  todex:
+    image: ghcr.io/youtonghy/todex_container:${TODEX_CONTAINER_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${TODEX_LISTEN:-127.0.0.1}:${TODEX_PORT:-7345}:7345"
+    environment:
+      TODEX_UID: ${TODEX_UID:-1000}
+      TODEX_GID: ${TODEX_GID:-1000}
+      # The work directory is mounted at its host path, so paths match on
+      # both sides (git worktrees, agent output, Desktop's local picker).
+      TODEX_AGENTD_WORKSPACE_ROOTS: ${TODEX_WORKDIR_TARGET:-${TODEX_WORKDIR:?set TODEX_WORKDIR to an absolute host directory}}
+      TODEX_AGENTD_PATH_MAPPINGS: ${TODEX_PATH_MAPPINGS:-}
+      TODEX_AGENTD_ADVERTISE_URL: http://${TODEX_ADVERTISE_HOST:-127.0.0.1}:${TODEX_PORT:-7345}
+      TODEX_EXTRA_AGENTS: ${TODEX_EXTRA_AGENTS-claude-code}
+      TODEX_GIT_NAME: ${TODEX_GIT_NAME:-}
+      TODEX_GIT_EMAIL: ${TODEX_GIT_EMAIL:-}
+    volumes:
+      - home:/home/todex
+      - type: bind
+        source: ${TODEX_WORKDIR:?set TODEX_WORKDIR to an absolute host directory}
+        target: ${TODEX_WORKDIR_TARGET:-${TODEX_WORKDIR}}
+
+volumes:
+  home:
