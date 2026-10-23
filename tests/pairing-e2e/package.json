@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Pairs with a running container like TodeX Desktop does, using TodeX_protocol's pairing code.",
   "scripts": {
-    "build": "tsc --ignoreConfig ${TODEX_PROTOCOL_DIR:-../../../TodeX_protocol}/src/*.ts --outDir dist/protocol --module commonjs --target es2022 --moduleResolution node --ignoreDeprecations 6.0 --esModuleInterop --skipLibCheck --strict && cp protocol-package.json dist/protocol/package.json"
+    "build": "node build.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "2.4.0",
