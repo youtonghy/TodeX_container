@@ -223,10 +223,9 @@ generate_compose() {
     local roots="" mappings="" i
     for i in "${!mount_hosts[@]}"; do
         roots+="${roots:+:}${mount_targets[$i]}"
-        # Mounts at their host path need no mapping.
-        if [ "${mount_hosts[$i]}" != "${mount_targets[$i]}" ]; then
-            mappings+="${mappings:+,}{\"hostPath\":$(json_string "${mount_hosts[$i]}"),\"backendPath\":$(json_string "${mount_targets[$i]}")}"
-        fi
+        # Mirrored mounts get identity mappings too: they tell Desktop which
+        # host folders the container can see.
+        mappings+="${mappings:+,}{\"hostPath\":$(json_string "${mount_hosts[$i]}"),\"backendPath\":$(json_string "${mount_targets[$i]}")}"
     done
     [ -z "$mappings" ] || mappings="[$mappings]"
     local advertise_host=$TODEX_LISTEN

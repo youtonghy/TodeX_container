@@ -7,7 +7,8 @@
 #   docker compose -f compose.yaml -f compose.build.yaml up -d --build
 #
 # For several work directories use bin/todexc or a compose.override.yaml; for
-# Windows hosts set TODEX_WORKDIR_TARGET and TODEX_PATH_MAPPINGS (see README).
+# Windows hosts set TODEX_WORKDIR_TARGET; TODEX_PATH_MAPPINGS always mirrors
+# the mount (see README and .env.example).
 services:
   todex:
     image: ghcr.io/youtonghy/todex_container:${TODEX_CONTAINER_TAG:-latest}

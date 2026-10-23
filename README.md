@@ -37,7 +37,7 @@ Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one log
 
 Use `--name NAME` before the command to run several instances (each needs its own `--port`). Instance settings live in `~/.config/todex-container/<name>/`.
 
-- `--mount PATH` mounts at the same path. `PATH:TARGET` mounts elsewhere, and the backend then publishes a host↔container path mapping that Desktop uses for *Choose locally* and *Open*.
+- `--mount PATH` mounts at the same path. `PATH:TARGET` mounts elsewhere. Every mount is published as a host↔container path mapping, which Desktop uses for *Choose locally* and *Open*.
 - `--agents` sets the CLIs installed on first start (default `claude-code`, `""` for none).
 - `--ssh-agent` forwards your SSH agent so agents can `git push` with your keys. It is off by default.
 - `--listen 0.0.0.0` lets other machines connect. They still have to pair, and all traffic is encrypted.
@@ -47,7 +47,7 @@ Mounting a folder after it has been used as a workspace at another path changes 
 ## Docker Compose
 
 ```sh
-cp .env.example .env   # set TODEX_WORKDIR, TODEX_UID, TODEX_GID
+cp .env.example .env   # set TODEX_WORKDIR, TODEX_PATH_MAPPINGS, TODEX_UID, TODEX_GID
 docker compose up -d
 docker compose exec -u todex todex todex-agentd pair approve <CODE>
 ```

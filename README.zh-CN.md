@@ -37,7 +37,7 @@ chmod +x todexc
 
 在命令前加 `--name NAME` 可以同时运行多个实例，每个实例要用不同的 `--port`。实例配置保存在 `~/.config/todex-container/<name>/`。
 
-- `--mount PATH` 按原路径挂载。`PATH:TARGET` 挂到别的路径，后端会公布宿主路径和容器路径的映射，Desktop 的“本地选择”和“打开”会用它换算路径。
+- `--mount PATH` 按原路径挂载。`PATH:TARGET` 挂到别的路径。每个挂载都会作为宿主路径和容器路径的映射公布出去，Desktop 的“本地选择”和“打开”靠它换算路径。
 - `--agents` 指定首次启动时安装的 CLI，默认 `claude-code`，传 `""` 表示不装。
 - `--ssh-agent` 把宿主机的 SSH agent 转发进容器，Agent 就能用你的密钥 `git push`。默认关闭。
 - `--listen 0.0.0.0` 允许其他机器连接。对方仍然需要配对，流量全程加密。
@@ -47,7 +47,7 @@ chmod +x todexc
 ## Docker Compose
 
 ```sh
-cp .env.example .env   # 设置 TODEX_WORKDIR、TODEX_UID、TODEX_GID
+cp .env.example .env   # 设置 TODEX_WORKDIR、TODEX_PATH_MAPPINGS、TODEX_UID、TODEX_GID
 docker compose up -d
 docker compose exec -u todex todex todex-agentd pair approve <验证码>
 ```
