@@ -211,7 +211,9 @@ ssh_agent_source() {
         # Docker Desktop's forwarded agent socket.
         printf '/run/host-services/ssh-auth.sock\n'
     else
-        [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ] || die "--ssh-agent needs a running SSH agent (SSH_AUTH_SOCK)"
+        if [ -z "${SSH_AUTH_SOCK:-}" ] || [ ! -S "$SSH_AUTH_SOCK" ]; then
+            die "--ssh-agent needs a running SSH agent (SSH_AUTH_SOCK)"
+        fi
         printf '%s\n' "$SSH_AUTH_SOCK"
     fi
 }
