@@ -113,7 +113,7 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 ### 3.3 镜像设计
 
 - 基础镜像：`debian:trixie-slim`，多阶段构建。
-  - `fetch` 阶段（`--platform=$BUILDPLATFORM`）：按 `TARGETARCH` 下载 `todex-agentd-v<ver>-linux-{x64,arm64}-gnu.bin` 并用 `SHA256SUMS` 校验；下载 Node.js 24 LTS 并校验 `SHASUMS256.txt`。
+  - `fetch` 阶段（`--platform=$BUILDPLATFORM`）：按 `TARGETARCH` 下载 `todex-agentd-v<ver>-linux-{x64,arm64}-gnu.bin` 并用 `SHA256SUMS` 校验，`SHA256SUMS` 本身须经 `SHA256SUMS.sig`（后端发布密钥对「`todex-release-v1\0` + 标签 + `\0` + `SHA256SUMS`」的 Ed25519 签名，公钥副本在 `keys/todex-release-signing.pub.pem`）以 `openssl pkeyutl -verify -rawin` 验证，v2.3.6 及更早的版本发布于签名之前，只校验哈希并在构建日志中警告；下载 Node.js 24 LTS 并校验 `SHASUMS256.txt`。
   - `runtime` 阶段：安装 `ca-certificates curl git openssh-client bash procps tini ripgrep jq less python3 gh xz-utils unzip`，复制 Node 和 `todex-agentd`，把预装 CLI 装到 `/opt/todex/agents`（root 属主），创建 `todex` 用户（默认 UID/GID 1000）。
 - CLI 版本由 build arg 固定（`CODEX_VERSION`、`OPENCODE_VERSION`、`PI_VERSION`……）：有 npm 包的 CLI 用 `npm install --prefix /opt/todex/agents <pkg>@<ver>`，没有的用厂商安装脚本（`HOME` 指向临时目录，装完移到 `/opt`）。解析出的版本写进 OCI label。
 - 入口：`ENTRYPOINT ["/usr/bin/tini","--","/usr/local/bin/todex-entrypoint"]`，`CMD ["todex-agentd","serve"]`。`todex-entrypoint` 以 root 运行，依次：

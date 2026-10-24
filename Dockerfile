@@ -18,13 +18,18 @@ FROM --platform=$BUILDPLATFORM ${DEBIAN_IMAGE} AS fetch
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && apt-get install -y --no-install-recommends ca-certificates curl openssl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 ARG TARGETARCH
 ARG TODEX_AGENTD_VERSION=2.3.6
 ARG NODE_VERSION=24.22.1
 WORKDIR /fetch
+# The backend's release signing key (TodeX_backend ci/release-signing.pub.pem).
+COPY keys/todex-release-signing.pub.pem /keys/todex-release-signing.pub.pem
 # Each artifact must be listed exactly once in its publisher's checksum file.
+# The backend's checksums are trusted only once SHA256SUMS.sig, an Ed25519
+# signature over "todex-release-v1\0" + tag + "\0" + SHA256SUMS, verifies under
+# that key; releases up to v2.3.6 predate signing and have only checksums.
 RUN case "$TARGETARCH" in \
         amd64) todex_label=linux-x64-gnu; node_label=linux-x64 ;; \
         arm64) todex_label=linux-arm64-gnu; node_label=linux-arm64 ;; \
@@ -39,6 +44,15 @@ RUN case "$TARGETARCH" in \
     && todex_asset="todex-agentd-v${TODEX_AGENTD_VERSION}-${todex_label}.bin" \
     && todex_base="https://github.com/youtonghy/TodeX_backend/releases/download/v${TODEX_AGENTD_VERSION}" \
     && fetch "$todex_base/SHA256SUMS" todex-SHA256SUMS \
+    && if [ "$(printf '%s\n' "$TODEX_AGENTD_VERSION" 2.3.6 | sort -V | tail -n1)" = 2.3.6 ]; then \
+        echo "warning: todex-agentd v${TODEX_AGENTD_VERSION} predates signed releases; only its SHA-256 checksum is checked" >&2; \
+    else \
+        fetch "$todex_base/SHA256SUMS.sig" todex-SHA256SUMS.sig \
+        && { printf 'todex-release-v1\0%s\0' "v${TODEX_AGENTD_VERSION}"; cat todex-SHA256SUMS; } > todex-signed \
+        && openssl pkeyutl -verify -pubin -inkey /keys/todex-release-signing.pub.pem -rawin \
+            -in todex-signed -sigfile todex-SHA256SUMS.sig \
+        || { echo "SHA256SUMS of todex-agentd v${TODEX_AGENTD_VERSION} is not signed by the TodeX release key" >&2; exit 1; }; \
+    fi \
     && fetch "$todex_base/$todex_asset" "$todex_asset" \
     && verify todex-SHA256SUMS "$todex_asset" \
     && install -D -m 0755 "$todex_asset" /out/release/todex-agentd \
