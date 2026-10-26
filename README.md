@@ -26,7 +26,7 @@ Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one log
 
 ## From TodeX Desktop
 
-Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers.
+Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers. Desktop can also run setup commands (such as `pnpm install`) in a new container workspace and freeze idle containers with `docker pause`, thawing them when you talk to them again.
 
 ## Local socket (Linux)
 

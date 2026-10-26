@@ -26,7 +26,7 @@ chmod +x todexc
 
 ## 在 TodeX Desktop 中管理
 
-不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。
+不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。Desktop 还能在新建容器工作区时运行初始化指令（例如 `pnpm install`），并把空闲的容器用 `docker pause` 冻结，再次对话时自动恢复。
 
 ## 本地 socket（Linux）
 
