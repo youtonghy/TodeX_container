@@ -24,6 +24,10 @@ Then, in TodeX Desktop:
 
 Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one login inside the container. Open a terminal on the container backend in Desktop and run `codex login --device-auth` or `claude`, then `/login`. Logins are kept in the home volume.
 
+## From TodeX Desktop
+
+Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers.
+
 ## Local socket (Linux)
 
 On Linux, `todexc` also mounts `~/.config/todex-container/<name>/ipc/` (created mode `0700`, owned by you) at `/run/todex-ipc` in the container, and the backend creates its local socket there as `agentd.sock`. TodeX Desktop on the same machine finds the container through that socket and approves its own pairing request, so no code needs to be typed. `todexc up` and `todexc status` print the socket path. The URL-and-code flow above keeps working for other machines and clients.

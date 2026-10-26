@@ -24,6 +24,10 @@ chmod +x todexc
 
 订阅登录（Codex 用 ChatGPT 账号、Claude Code 用 Claude 账号）可能需要在容器里登录一次：在 Desktop 中打开这个后端的终端，运行 `codex login --device-auth`，或者运行 `claude` 后输入 `/login`。登录状态保存在 home 卷里。
 
+## 在 TodeX Desktop 中管理
+
+不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。
+
 ## 本地 socket（Linux）
 
 在 Linux 上，`todexc` 还会把 `~/.config/todex-container/<name>/ipc/`（以 `0700` 创建，属于你）挂到容器的 `/run/todex-ipc`，后端在里面创建本地 socket `agentd.sock`。同一台机器上的 TodeX Desktop 通过这个 socket 发现容器，并自己批准配对请求，不需要输入验证码。`todexc up` 和 `todexc status` 会打印 socket 路径。其他机器和客户端照旧使用上面的 URL 加验证码流程。

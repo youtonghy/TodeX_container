@@ -285,7 +285,7 @@ ChatGPT / Claude 订阅这类 OAuth 登录是否包含在 accounts 同步里，�
 ### 5.2 明确不包含
 
 - 一次性配对令牌 / 配对链接自动批准。可以作为配对 v3 的扩展后续加入：令牌只通过 `docker exec` 展示，不写日志；客户端用令牌对 transcript 做 HMAC，与传输公钥绑定；只能用一次，10 分钟过期。
-- Desktop 直接管理 Docker（在界面里一键创建容器、管理挂载）。
+- Desktop 直接管理 Docker（在界面里一键创建容器、管理挂载）。（2026-10-26 已在 TodeX Desktop 实现：设置 → TodeX Container 与“容器工作区”，沿用 `todexc` 的实例目录格式，Desktop 用 `scripts/fixtures/todexc-dev` 对照 `todexc` 的输出。改动 `todexc` 的 `settings.env`、`mounts` 或 compose 生成时，同步更新 Desktop 的 `src/main/container/instance.ts` 和这份 fixture。）
 - 容器内的 Agent 浏览器（Xvfb + Chrome for Testing）和 Computer Use。
 - Windows PowerShell 版 `todexc`（Windows 先用 compose）。
 - 不经过 Desktop 的离线配置包导入，以及同步时重写路径。
