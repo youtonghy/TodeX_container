@@ -26,11 +26,13 @@ chmod +x todexc
 
 ## 在 TodeX Desktop 中管理
 
-不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。Desktop 还能在新建容器工作区时运行初始化指令（例如 `pnpm install`），并把空闲的容器用 `docker pause` 冻结，再次对话时自动恢复。
+不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。在 Linux 上，Desktop 新建的容器不往宿主机发布端口，只通过本地 socket 连接；其他平台上，Desktop 从设置里的端口范围（默认 17345–17444）随机挑一个空闲端口发布，并且不会用本机后端的端口。Desktop 还能在新建容器工作区时运行初始化指令（例如 `pnpm install`），并把空闲的容器用 `docker pause` 冻结，再次对话时自动恢复。
 
 ## 本地 socket（Linux）
 
 在 Linux 上，`todexc` 还会把 `~/.config/todex-container/<name>/ipc/`（以 `0700` 创建，属于你）挂到容器的 `/run/todex-ipc`，后端在里面创建本地 socket `agentd.sock`。同一台机器上的 TodeX Desktop 通过这个 socket 发现容器，并自己批准配对请求，不需要输入验证码。`todexc up` 和 `todexc status` 会打印 socket 路径。其他机器和客户端照旧使用上面的 URL 加验证码流程。
+
+`todexc up --no-publish` 完全不发布宿主机端口，容器就不会占用其他后端需要的端口，这时只有本机的 Desktop 能连接。`--publish` 重新打开端口。
 
 socket 只接受与后端运行用户相同 UID 的连接，`todexc` 会把这个 UID 设成你的。经它配对不需要网络侧的批准入口，信任程度等同于对后端数据目录的文件访问权限。
 
@@ -41,7 +43,7 @@ socket 只接受与后端运行用户相同 UID 的连接，`todexc` 会把这�
 
 | 命令 | 作用 |
 | --- | --- |
-| `todexc up [--mount PATH[:TARGET]]... [--port N] [--listen ADDR] [--agents LIST] [--ssh-agent] [--tag TAG]` | 创建或更新实例并启动；选项会被记住 |
+| `todexc up [--mount PATH[:TARGET]]... [--port N] [--listen ADDR] [--no-publish] [--agents LIST] [--ssh-agent] [--tag TAG]` | 创建或更新实例并启动；选项会被记住 |
 | `todexc pair [CODE]` | 批准 Desktop 的配对请求；暂时没有请求时会等待 |
 | `todexc devices [revoke ID]` | 列出已配对设备，或撤销其中一个 |
 | `todexc mount list\|add PATH[:TARGET]\|rm PATH` | 修改挂载目录；容器会重建，home 卷保留 |

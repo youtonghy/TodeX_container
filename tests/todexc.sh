@@ -78,6 +78,17 @@ chmod 0755 "$ipc"
 todexc up || fail "up again: $(cat "$scratch/stderr")"
 [ "$(stat -c %a "$ipc")" = 700 ] || fail "ipc directory mode was not reset to 700"
 
+# --no-publish drops the host port and the advertised URL; --publish restores them.
+todexc --name ipconly up --no-publish --mount "$scratch/work/c" || fail "no-publish: $(cat "$scratch/stderr")"
+ipc_compose="$scratch/config/todex-container/ipconly/compose.yaml"
+if grep -qE 'ports:|ADVERTISE_URL' "$ipc_compose"; then fail "no-publish still publishes"; fi
+grep -q 'TODEX_PUBLISH=0' "$scratch/config/todex-container/ipconly/settings.env" || fail "no-publish not saved"
+todexc --name ipconly upgrade || fail "upgrade no-publish"
+if grep -q 'ports:' "$ipc_compose"; then fail "upgrade publishes a no-publish instance"; fi
+todexc --name ipconly up --publish || fail "publish again"
+grep -q '"127.0.0.1:7345:7345"' "$ipc_compose" || fail "--publish does not restore the port"
+TODEXC_TEST_UNAME=Darwin expect_failure --name macipc up --no-publish --mount "$scratch/work/c"
+
 # Docker Desktop cannot pass Unix sockets: no ipc mount on macOS.
 TODEXC_TEST_UNAME=Darwin todexc --name mac up --mount "$scratch/work/c" || fail "macOS instance: $(cat "$scratch/stderr")"
 mac_compose="$scratch/config/todex-container/mac/compose.yaml"

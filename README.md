@@ -26,11 +26,13 @@ Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one log
 
 ## From TodeX Desktop
 
-Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers. Desktop can also run setup commands (such as `pnpm install`) in a new container workspace and freeze idle containers with `docker pause`, thawing them when you talk to them again.
+Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers. On Linux, containers that Desktop creates publish no host port and are reached only through the local socket; elsewhere Desktop publishes each container on a random free port from the range set in its settings (17345–17444 by default), never on the port of the native backend. Desktop can also run setup commands (such as `pnpm install`) in a new container workspace and freeze idle containers with `docker pause`, thawing them when you talk to them again.
 
 ## Local socket (Linux)
 
 On Linux, `todexc` also mounts `~/.config/todex-container/<name>/ipc/` (created mode `0700`, owned by you) at `/run/todex-ipc` in the container, and the backend creates its local socket there as `agentd.sock`. TodeX Desktop on the same machine finds the container through that socket and approves its own pairing request, so no code needs to be typed. `todexc up` and `todexc status` print the socket path. The URL-and-code flow above keeps working for other machines and clients.
+
+`todexc up --no-publish` publishes no host port at all, so the container cannot take a port another backend needs; only Desktop on this machine can connect then. `--publish` turns the port back on.
 
 The socket only accepts connections from the user ID the backend runs as, which `todexc` sets to yours. Pairing through it needs no network-side approval: it is as trusted as file access to the backend's data directory.
 
@@ -41,7 +43,7 @@ The socket only accepts connections from the user ID the backend runs as, which 
 
 | Command | What it does |
 | --- | --- |
-| `todexc up [--mount PATH[:TARGET]]... [--port N] [--listen ADDR] [--agents LIST] [--ssh-agent] [--tag TAG]` | Create or update the instance and start it. Options are remembered. |
+| `todexc up [--mount PATH[:TARGET]]... [--port N] [--listen ADDR] [--no-publish] [--agents LIST] [--ssh-agent] [--tag TAG]` | Create or update the instance and start it. Options are remembered. |
 | `todexc pair [CODE]` | Approve a Desktop pairing request (waits for one if none is pending). |
 | `todexc devices [revoke ID]` | List paired devices, or revoke one. |
 | `todexc mount list\|add PATH[:TARGET]\|rm PATH` | Change mounted directories. The container is recreated; the home volume stays. |
