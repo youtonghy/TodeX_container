@@ -4,7 +4,7 @@
 
 这是一个 Docker 镜像，内置 `todex-agentd`（[TodeX 后端](https://github.com/youtonghy/TodeX_backend)）和 Agent CLI，可以直接与 TodeX Desktop 配对。Agent 在容器里运行，只能访问你挂载进去的宿主机目录，碰不到机器上的其他东西。
 
-镜像预装 Codex、OpenCode、Pi。它们都是开源许可，每个镜像版本固定。Claude Code 的许可不允许放进公开镜像，所以在首次启动时装进容器的 home 卷。其他 TodeX Provider（Grok Build、Devin、Antigravity、DeepSeek Harness）也可以这样安装，或者在 Desktop 的 CLI 管理页里安装。
+镜像预装 Codex、OpenCode、Pi。它们都是开源许可，每个镜像版本固定。Claude Code 的许可不允许放进公开镜像，所以在首次启动时装进容器的 home 卷。其他 TodeX Provider（Grok Build、Devin、Antigravity、DeepSeek Harness、omp）也可以这样安装，或者在 Desktop 的 CLI 管理页里安装。omp（oh-my-pi）是体积较大的 Bun 编译二进制，不是 npm CLI，所以不预装：需要时用 `--agents claude-code,omp`（`TODEX_EXTRA_AGENTS`）安装。
 
 ## 快速开始（Linux、macOS）
 
@@ -98,7 +98,7 @@ Desktop 会用这个映射，把“本地选择”选中的目录换成容器路
 需要长期保留的数据都在 `todex` 的 home 卷里：
 
 - 后端数据目录 `~/.todex-agent`：配对密钥、已配对设备、Provider 配置、会话；
-- 各 Agent 自己的配置和登录：`~/.codex`、`~/.claude`、`~/.config/opencode`、`~/.pi` 等；
+- 各 Agent 自己的配置和登录：`~/.codex`、`~/.claude`、`~/.config/opencode`、`~/.pi`、`~/.omp` 等；
 - 之后安装的 CLI：`~/.local`。
 
 更新靠换新镜像。后端的自更新已关闭；镜像自带的 CLI 在 Desktop 里显示“随镜像更新”。

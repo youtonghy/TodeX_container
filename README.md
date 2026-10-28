@@ -4,7 +4,7 @@
 
 A Docker image with `todex-agentd` (the [TodeX backend](https://github.com/youtonghy/TodeX_backend)) and agent CLIs, ready to pair with TodeX Desktop. Agents run inside the container and work in host directories you mount; the rest of your machine stays out of reach.
 
-Preinstalled: Codex, OpenCode and Pi (openly licensed, versions fixed per image). Claude Code is installed into the container's home volume on first start, because its license does not allow shipping it in a public image. Other TodeX providers (Grok Build, Devin, Antigravity, DeepSeek Harness) install the same way, or from Desktop's CLI management page.
+Preinstalled: Codex, OpenCode and Pi (openly licensed, versions fixed per image). Claude Code is installed into the container's home volume on first start, because its license does not allow shipping it in a public image. Other TodeX providers (Grok Build, Devin, Antigravity, DeepSeek Harness, omp) install the same way, or from Desktop's CLI management page. omp (oh-my-pi) ships as a large Bun-compiled binary rather than an npm CLI, so it is not preinstalled: add it with `--agents claude-code,omp` (`TODEX_EXTRA_AGENTS`).
 
 ## Quick start (Linux, macOS)
 
@@ -95,7 +95,7 @@ Desktop uses the mapping to turn a folder picked with *Choose locally* into the 
 
 The container runs `todex-agentd serve` as the unprivileged `todex` user under `tini`. At start, the entrypoint aligns `todex` with `TODEX_UID`/`TODEX_GID`, installs `TODEX_EXTRA_AGENTS` that are missing, and drops privileges.
 
-Everything that must survive lives in the `todex` home volume: the backend data dir `~/.todex-agent` (pairing keys, paired devices, provider profiles, conversations), the agents' own config and logins (`~/.codex`, `~/.claude`, `~/.config/opencode`, `~/.pi`, …), and CLIs installed later (`~/.local`).
+Everything that must survive lives in the `todex` home volume: the backend data dir `~/.todex-agent` (pairing keys, paired devices, provider profiles, conversations), the agents' own config and logins (`~/.codex`, `~/.claude`, `~/.config/opencode`, `~/.pi`, `~/.omp`, …), and CLIs installed later (`~/.local`).
 
 Updates come from new images. The backend's self-update is off, and image-provided CLIs show *Updated with the image* in Desktop.
 
