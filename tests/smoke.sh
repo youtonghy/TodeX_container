@@ -79,8 +79,12 @@ done
 pass "codex, opencode and pi are preinstalled"
 
 [ "$(docker exec "$container" id -u todex)" = "$(id -u)" ] || fail "todex UID was not aligned with the host"
-[ "$(docker top "$container" -o user,args | awk '/todex-agentd serve/ { print $1 }' | head -n 1)" != root ] \
-    || fail "todex-agentd runs as root"
+# tini and the entrypoint (root) carry "todex-agentd serve" in their args too;
+# the daemon is the process whose program is todex-agentd itself.
+daemon_user=$(docker top "$container" -o pid,user,args \
+    | awk '$3 ~ /(^|\/)todex-agentd$/ && $4 == "serve" { print $2; exit }')
+[ -n "$daemon_user" ] || fail "no todex-agentd serve process found"
+[ "$daemon_user" != root ] || fail "todex-agentd runs as root"
 as_todex touch "$workdir/created-in-container"
 [ "$(stat -c %u "$workdir/created-in-container")" = "$(id -u)" ] || fail "file created in the container is not owned by the host user"
 pass "daemon runs unprivileged and mounted files keep host ownership"
