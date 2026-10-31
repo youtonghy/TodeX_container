@@ -58,6 +58,7 @@ TodeX lives in sibling checkouts under the same parent directory:
 - `../TodeX_desktop` — Electron desktop client; pairs with the container and runs the config sync
 - `../TodeX_web` — Web client; mirrors the desktop renderer and owns the existing Docker image conventions
 - `../TodeX_protocol` — shared TypeScript protocol layer (`@todex/protocol`) compiled from source by the desktop and web clients
+- `../TodeX_native` — Expo / React Native mobile client (HeroUI Native + Pro) that pairs with the backend like the desktop and web clients
 
 When a task requires it — aligning the image with the backend's configuration or API, adding a backend or client interface the container needs, or a change that explicitly spans repos — read and edit those sibling repositories directly at their paths, even though they sit outside this repository. Follow each repo's own `AGENTS.md` while working inside it. Commit and push in each repository separately per its Git delivery rules; never mix another repo's changes into this repository's commits.
 
