@@ -1,2 +1,6 @@
 .env
 agents/node_modules/
+
+# agent tooling
+.pi/
+.claude/
