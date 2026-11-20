@@ -1,10 +1,19 @@
 # TodeX Agent 容器
 
-[English](README.md)
+<p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 这是一个 Docker 镜像，内置 `todex-agentd`（[TodeX 后端](https://github.com/youtonghy/TodeX_backend)）和 Agent CLI，可以直接与 TodeX Desktop 配对。Agent 在容器里运行，只能访问你挂载进去的宿主机目录，碰不到机器上的其他东西。
 
 镜像预装 Codex、OpenCode、Pi。它们都是开源许可，每个镜像版本固定。Claude Code 的许可不允许放进公开镜像，所以在首次启动时装进容器的 home 卷。其他 TodeX Provider（Grok Build、Devin、Antigravity、DeepSeek Harness、omp）也可以这样安装，或者在 Desktop 的 CLI 管理页里安装。omp（oh-my-pi）是体积较大的 Bun 编译二进制，不是 npm CLI，所以不预装：需要时用 `--agents claude-code,omp`（`TODEX_EXTRA_AGENTS`）安装。
+
+## 亮点
+
+- **隔离运行**：Agent 在容器里运行，只能看到你挂载的文件夹；你的密钥、其他项目和机器上的其他内容都碰不到。
+- **一条命令就绪**：`todexc up` 启动后端，预装 Codex、OpenCode 和 Pi，Claude Code 在首次启动时安装。
+- **内外路径一致**：挂载的文件夹保持宿主机路径（Windows 上使用声明的映射），工作区、git worktree 和 TodeX 中的“打开”都能对上。
+- **沿用你的配置**：配置同步会从已有后端复制 Agent 账号、设置、MCP 服务器和 Skill。
+- **在 TodeX 桌面端中管理**：无需终端即可创建、升级、重新挂载、冻结和清理容器。
+- **默认安全**：只接受已配对设备，传输加密，默认只发布在本机回环地址，容器内不挂载 Docker socket。
 
 ## 快速开始（Linux、macOS）
 
@@ -20,6 +29,9 @@ chmod +x todexc
 
 1. **配对。** 设置 → 后端连接 → 添加，填 `http://127.0.0.1:7345`，开始配对，Desktop 会显示验证码。在宿主机运行 `./todexc pair`，输入这个验证码，Desktop 随即连上。
 2. **同步 Agent 配置。** 如果 Desktop 也配对了你原有的 TodeX 后端，新后端会提示“同步 Agent 配置”。同步内容包括：Provider 账号（API Key、Base URL）、CLI 设置和指令、MCP 服务器、技能。容器上已有的内容不会被删除。SSH 主机默认不同步，因为容器里没有你的私钥。
+
+   ![TodeX 桌面端中的配置同步](docs/screenshots/config-sync-zh.png)
+
 3. **开始工作。** 新建工作区，用“本地选择”选 `~/projects` 下的目录。容器内外路径相同，所以 Agent 输出的路径、git worktree、Desktop 里的“打开”都对得上。
 
 订阅登录（Codex 用 ChatGPT 账号、Claude Code 用 Claude 账号）可能需要在容器里登录一次：在 Desktop 中打开这个后端的终端，运行 `codex login --device-auth`，或者运行 `claude` 后输入 `/login`。登录状态保存在 home 卷里。
@@ -28,6 +40,10 @@ chmod +x todexc
 
 不用 `todexc`，TodeX Desktop 也能完成上面这些（设置 → **TodeX Container**）：检测 Docker 环境，创建、启动、停止、升级、修改挂载、删除容器，查看日志，并自动清理旧镜像和长时间停止的容器。在 Desktop 的“新建工作区”里选 **容器工作区**，会把所选目录挂载进容器（需要时新建容器）、自动配对并连接、创建工作区，再询问安装哪些 Agent、是否同步配置。Desktop 把每个实例保存在与 `todexc` 相同的 `~/.config/todex-container/<名称>/` 文件里，两者管理的是同一批容器。在 Linux 上，Desktop 新建的容器不往宿主机发布端口，只通过本地 socket 连接；其他平台上，Desktop 从设置里的端口范围（默认 17345–17444）随机挑一个空闲端口发布，并且不会用本机后端的端口。Desktop 还能在新建容器工作区时运行初始化指令（例如 `pnpm install`），并把空闲的容器用 `docker pause` 冻结，再次对话时自动恢复。
 
+
+容器里的 Agent CLI 会显示在 Desktop 的 CLI 管理页中；随镜像提供的 CLI 标记为“随镜像更新”。
+
+![TodeX 桌面端中的 CLI 管理](docs/screenshots/settings-cli-zh.png)
 ## 本地 socket（Linux）
 
 在 Linux 上，`todexc` 还会把 `~/.config/todex-container/<name>/ipc/`（以 `0700` 创建，属于你）挂到容器的 `/run/todex-ipc`，后端在里面创建本地 socket `agentd.sock`。同一台机器上的 TodeX Desktop 通过这个 socket 发现容器，并自己批准配对请求，不需要输入验证码。`todexc up` 和 `todexc status` 会打印 socket 路径。其他机器和客户端照旧使用上面的 URL 加验证码流程。

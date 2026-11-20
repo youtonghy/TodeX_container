@@ -1,10 +1,19 @@
 # TodeX agent container
 
-[中文](README.zh-CN.md)
+<p align="center"><a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a></p>
 
 A Docker image with `todex-agentd` (the [TodeX backend](https://github.com/youtonghy/TodeX_backend)) and agent CLIs, ready to pair with TodeX Desktop. Agents run inside the container and work in host directories you mount; the rest of your machine stays out of reach.
 
 Preinstalled: Codex, OpenCode and Pi (openly licensed, versions fixed per image). Claude Code is installed into the container's home volume on first start, because its license does not allow shipping it in a public image. Other TodeX providers (Grok Build, Devin, Antigravity, DeepSeek Harness, omp) install the same way, or from Desktop's CLI management page. omp (oh-my-pi) ships as a large Bun-compiled binary rather than an npm CLI, so it is not preinstalled: add it with `--agents claude-code,omp` (`TODEX_EXTRA_AGENTS`).
+
+## Highlights
+
+- **Isolated agents**: agents run in the container and see only the folders you mount; your keys, other projects and the rest of the machine stay out of reach.
+- **Ready in one command**: `todexc up` starts the backend with Codex, OpenCode and Pi preinstalled and Claude Code installed on first start.
+- **Same paths inside and out**: mounted folders keep their host path (or a declared mapping on Windows), so workspaces, git worktrees and *Open* in TodeX line up.
+- **Your setup comes along**: config sync copies agent accounts, settings, MCP servers and skills from an existing backend.
+- **Managed from TodeX Desktop**: create, upgrade, remount, freeze and clean up containers without a terminal.
+- **Secure by default**: paired devices only, encrypted transport, published on loopback only, no Docker socket inside.
 
 ## Quick start (Linux, macOS)
 
@@ -20,6 +29,9 @@ Then, in TodeX Desktop:
 
 1. **Pair.** Settings → Backend connections → Add, enter `http://127.0.0.1:7345`, and start pairing. Desktop shows a verification code. On the host, run `./todexc pair` and enter that code. Desktop connects.
 2. **Bring your agent configuration.** If Desktop is also paired with your existing TodeX backend, the new backend offers *Sync agent configuration*. It copies provider accounts (API keys and base URLs), CLI settings and instructions, MCP servers and skills. Nothing on the container is deleted. SSH hosts are left out by default, because the container has none of your private keys.
+
+   ![Config sync in TodeX Desktop](docs/screenshots/config-sync-en.png)
+
 3. **Work.** Create a workspace and pick a folder under `~/projects` with *Choose locally*. The path is the same in the container, so agent output, git worktrees and *Open* in Desktop all line up.
 
 Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one login inside the container. Open a terminal on the container backend in Desktop and run `codex login --device-auth` or `claude`, then `/login`. Logins are kept in the home volume.
@@ -28,6 +40,10 @@ Subscription logins (ChatGPT for Codex, Claude for Claude Code) may need one log
 
 Instead of `todexc`, TodeX Desktop can do all of this itself (Settings → **TodeX Container**): it checks the Docker environment, creates, starts, stops, upgrades, remounts and deletes containers, shows their logs, and cleans up old images and long-stopped containers. In Desktop's *New workspace* dialog, **Container workspace** mounts the chosen folder into a container (creating one if needed), pairs and connects, creates the workspace, and offers agent installs and config sync. Desktop keeps each instance in the same `~/.config/todex-container/<name>/` files `todexc` uses, so the two tools manage the same containers. On Linux, containers that Desktop creates publish no host port and are reached only through the local socket; elsewhere Desktop publishes each container on a random free port from the range set in its settings (17345–17444 by default), never on the port of the native backend. Desktop can also run setup commands (such as `pnpm install`) in a new container workspace and freeze idle containers with `docker pause`, thawing them when you talk to them again.
 
+
+Agent CLIs in a container show up in Desktop's CLI management; CLIs that ship with the image are marked *Updated with the image*.
+
+![CLI management in TodeX Desktop](docs/screenshots/settings-cli-en.png)
 ## Local socket (Linux)
 
 On Linux, `todexc` also mounts `~/.config/todex-container/<name>/ipc/` (created mode `0700`, owned by you) at `/run/todex-ipc` in the container, and the backend creates its local socket there as `agentd.sock`. TodeX Desktop on the same machine finds the container through that socket and approves its own pairing request, so no code needs to be typed. `todexc up` and `todexc status` print the socket path. The URL-and-code flow above keeps working for other machines and clients.
