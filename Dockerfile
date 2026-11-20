@@ -21,7 +21,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl openssl xz-utils \
     && rm -rf /var/lib/apt/lists/*
 ARG TARGETARCH
-ARG TODEX_AGENTD_VERSION=2.3.6
+ARG TODEX_AGENTD_VERSION=2.5.1
 ARG NODE_VERSION=24.22.1
 WORKDIR /fetch
 # The backend's release signing key (TodeX_backend ci/release-signing.pub.pem).
@@ -107,7 +107,7 @@ RUN npm ci --omit=dev --no-audit --no-fund \
 
 FROM base AS runtime
 ARG TODEX_BUILD_VERSION=DEV0.0.0
-ARG TODEX_AGENTD_VERSION=2.3.6
+ARG TODEX_AGENTD_VERSION=2.5.1
 ARG NODE_VERSION=24.22.1
 LABEL org.opencontainers.image.title="TodeX agent container" \
       org.opencontainers.image.description="todex-agentd with agent CLIs, ready to pair with TodeX Desktop" \
