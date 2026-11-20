@@ -124,6 +124,8 @@ Updates come from new images. The backend's self-update is off, and image-provid
 
 ## Development
 
+The Claude Code region preflight runs inside the daemon. For managed Claude Code calls, allow the container to reach `api.anthropic.com`, `claude.ai`, `platform.claude.com`, and `ipx.al` over HTTPS. An unsupported or unverifiable egress region blocks the call.
+
 ```sh
 # Local image from the released backend
 docker compose -f compose.yaml -f compose.build.yaml up -d --build
